@@ -1,0 +1,67 @@
+{
+    "Records": [
+        {
+            "domain_name": "sepi.pro",
+            "record_type": "A",
+            "record_value": "CLOUDFRONT_DISTRIBUTION_DOMAIN",
+            "alias": true,
+            "description": "Main domain pointing to CloudFront"
+        },
+        {
+            "domain_name": "www.sepi.pro",
+            "record_type": "A",
+            "record_value": "CLOUDFRONT_DISTRIBUTION_DOMAIN",
+            "alias": true,
+            "description": "WWW subdomain pointing to CloudFront"
+        },
+        {
+            "domain_name": "api.sepi.pro",
+            "record_type": "A",
+            "record_value": "API_GATEWAY_DOMAIN",
+            "alias": true,
+            "description": "API subdomain pointing to API Gateway"
+        },
+        {
+            "domain_name": "sepi.pro",
+            "record_type": "MX",
+            "record_value": "10 inbound-smtp.us-east-1.amazonaws.com",
+            "ttl": 300,
+            "description": "SES email receiving"
+        },
+        {
+            "domain_name": "_amazonses.sepi.pro",
+            "record_type": "TXT",
+            "record_value": "SES_VERIFICATION_TOKEN",
+            "ttl": 300,
+            "description": "SES domain verification"
+        },
+        {
+            "domain_name": "sepi.pro",
+            "record_type": "TXT",
+            "record_value": "v=spf1 include:amazonses.com ~all",
+            "ttl": 300,
+            "description": "SPF record for SES"
+        },
+        {
+            "domain_name": "_dmarc.sepi.pro",
+            "record_type": "TXT",
+            "record_value": "v=DMARC1; p=quarantine; rua=mailto:dmarc@sepi.pro",
+            "ttl": 300,
+            "description": "DMARC policy"
+        },
+        {
+            "domain_name": "DKIM_SELECTOR._domainkey.sepi.pro",
+            "record_type": "CNAME",
+            "record_value": "DKIM_VALUE.dkim.amazonses.com",
+            "ttl": 300,
+            "description": "DKIM for SES (get from SES console)"
+        }
+    ],
+    "Notes": [
+        "Replace CLOUDFRONT_DISTRIBUTION_DOMAIN with your CloudFront distribution domain",
+        "Replace API_GATEWAY_DOMAIN with your API Gateway custom domain",
+        "Replace SES_VERIFICATION_TOKEN with the token from SES console",
+        "Replace DKIM_SELECTOR and DKIM_VALUE with values from SES console",
+        "For Route 53, use ALIAS records instead of A records for better performance"
+    ]
+}

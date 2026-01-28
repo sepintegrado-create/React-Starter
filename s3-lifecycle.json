@@ -1,0 +1,61 @@
+{
+    "Rules": [
+        {
+            "Id": "TransitionToIA",
+            "Status": "Enabled",
+            "Transitions": [
+                {
+                    "Days": 30,
+                    "StorageClass": "STANDARD_IA"
+                },
+                {
+                    "Days": 90,
+                    "StorageClass": "GLACIER"
+                }
+            ],
+            "Filter": {
+                "Prefix": "certificates/"
+            }
+        },
+        {
+            "Id": "TransitionDocuments",
+            "Status": "Enabled",
+            "Transitions": [
+                {
+                    "Days": 60,
+                    "StorageClass": "GLACIER"
+                }
+            ],
+            "Filter": {
+                "Prefix": "fiscal-documents/"
+            }
+        },
+        {
+            "Id": "DeleteOldLogs",
+            "Status": "Enabled",
+            "Expiration": {
+                "Days": 90
+            },
+            "Filter": {
+                "Prefix": "logs/"
+            }
+        },
+        {
+            "Id": "DeleteOldTempFiles",
+            "Status": "Enabled",
+            "Expiration": {
+                "Days": 7
+            },
+            "Filter": {
+                "Prefix": "temp/"
+            }
+        },
+        {
+            "Id": "DeleteIncompleteMultipartUploads",
+            "Status": "Enabled",
+            "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7
+            }
+        }
+    ]
+}

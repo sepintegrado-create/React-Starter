@@ -1,0 +1,821 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USERS AND AUTHENTICATION
+// ============================================
+
+model User {
+  id                String    @id @default(uuid())
+  cpf               String    @unique
+  name              String
+  email             String    @unique
+  phone             String
+  passwordHash      String
+  role              UserRole
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean   @default(true)
+  acceptedTerms     Boolean
+  acceptedTermsAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  companies         Company[]
+  employeeOf        Employee[]
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  
+  @@index([email])
+  @@index([cpf])
+}
+
+enum UserRole {
+  PLATFORM_ADMIN
+  COMPANY_ADMIN
+  EMPLOYEE
+  USER
+}
+
+// ============================================
+// COMPANIES
+// ============================================
+
+model Company {
+  id                  String         @id @default(uuid())
+  cnpj                String         @unique
+  name                String
+  tradeName           String
+  email               String
+  phone               String
+  
+  // Address
+  addressStreet       String
+  addressNumber       String
+  addressComplement   String?
+  addressNeighborhood String
+  addressCity         String
+  addressState        String
+  addressZipCode      String
+  addressCountry      String        @default("Brasil")
+  
+  ownerId             String
+  owner               User          @relation(fields: [ownerId], references: [id])
+  
+  planId              String
+  plan                SubscriptionPlan @relation(fields: [planId], references: [id])
+  planStatus          PlanStatus    @default(ACTIVE)
+  
+  // Settings
+  businessType        String
+  logo                String?
+  coverPhoto          String?
+  bio                 String?
+  primaryColor        String?
+  fiscalRegime        FiscalRegime
+  
+  // Social Links
+  instagramUrl        String?
+  facebookUrl         String?
+  linkedinUrl         String?
+  whatsappNumber      String?
+  
+  // Features
+  enablePDV           Boolean       @default(true)
+  enableFiscal        Boolean       @default(false)
+  enableQRCode        Boolean       @default(true)
+  enableInventory     Boolean       @default(true)
+  enableAppointments  Boolean       @default(false)
+  enableMenu          Boolean       @default(true)
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  
+  // Relationships
+  fiscalConfig        FiscalConfig?
+  mercadoPagoConfig   MercadoPagoConfig?
+  certificates        DigitalCertificate[]
+  products            Product[]
+  categories          Category[]
+  employees           Employee[]
+  customers           Customer[]
+  suppliers           Supplier[]
+  invoices            FiscalDocument[]
+  transactions        Transaction[]
+  qrCodes             QRCode[]
+  
+  @@index([ownerId])
+  @@index([cnpj])
+}
+
+enum PlanStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum FiscalRegime {
+  SIMPLES
+  PRESUMIDO
+  REAL
+}
+
+// ============================================
+// FISCAL - CERTIFICATES
+// ============================================
+
+model DigitalCertificate {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  alias             String
+  type              String        @default("A1")
+  
+  // Secure reference to certificate in KMS/S3
+  kmsKeyId          String        @unique
+  s3Bucket          String
+  s3Key             String
+  
+  // Certificate metadata
+  issuer            String
+  subject           String
+  serialNumber      String
+  expiryDate        DateTime
+  status            CertStatus    @default(ACTIVE)
+  
+  uploadedAt        DateTime      @default(now())
+  lastUsedAt        DateTime?
+  
+  @@index([companyId])
+  @@index([expiryDate])
+}
+
+enum CertStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+// ============================================
+// PLATFORM CONFIGURATION
+// ============================================
+
+model PlatformConfig {
+  id                String        @id @default(uuid())
+  
+  // Tegra API - Platform Level (encrypted)
+  tegraApiKey       String?
+  tegraCompanyId    String?
+  tegraEnvironment  String?       @default("homologacao") // producao | homologacao
+  tegraBaseUrl      String?       @default("https://api.nfe.io/v1")
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+// ============================================
+// FISCAL - CONFIGURATION
+// ============================================
+
+model FiscalConfig {
+  id                String        @id @default(uuid())
+  companyId         String        @unique
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  regime            FiscalRegime
+  
+  // Series
+  nfeSeries         String        @default("1")
+  nfceSeries        String        @default("1")
+  nfseSeries        String        @default("1")
+  
+  // Next numbers
+  nfeNextNumber     Int           @default(1)
+  nfceNextNumber    Int           @default(1)
+  nfseNextNumber    Int           @default(1)
+  
+  // Default settings
+  cfopDefault       String        @default("5102")
+  
+  // CSC for NFC-e
+  cscId             String?
+  cscToken          String?
+  
+  // Environment
+  environment       FiscalEnv     @default(HOMOLOGACAO)
+  
+  // Tegra API - Company Level (optional override)
+  enableTegraIntegration Boolean   @default(false)
+  tegraApiKey       String?       // Override platform API key (encrypted)
+  tegraCompanyId    String?       // ID da empresa na Tegra
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum FiscalEnv {
+  PRODUCAO
+  HOMOLOGACAO
+}
+
+// ============================================
+// FISCAL - DOCUMENTS
+// ============================================
+
+model FiscalDocument {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id])
+  
+  type              InvoiceType
+  number            String
+  series            String
+  
+  transactionId     String?
+  transaction       Transaction?  @relation(fields: [transactionId], references: [id])
+  
+  status            InvoiceStatus @default(DRAFT)
+  
+  // Recipient data
+  recipientName     String
+  recipientCpfCnpj  String
+  recipientEmail    String?
+  recipientPhone    String?
+  
+  // Address
+  recipientStreet   String?
+  recipientNumber   String?
+  recipientCity     String?
+  recipientState    String?
+  recipientZipCode  String?
+  
+  // Values
+  totalValue        Decimal       @db.Decimal(10, 2)
+  taxValue          Decimal       @db.Decimal(10, 2)
+  discountValue     Decimal       @db.Decimal(10, 2) @default(0)
+  
+  // Tegra integration
+  tegraId           String?       @unique
+  accessKey         String?       @unique // 44 digits
+  protocol          String?
+  
+  // Files
+  xmlS3Key          String?
+  danfeS3Key        String?
+  
+  // Events
+  issuedAt          DateTime?
+  authorizedAt      DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?
+  
+  // Metadata
+  environment       FiscalEnv
+  errorMessage      String?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  events            FiscalEvent[]
+  items             FiscalDocumentItem[]
+  
+  @@index([companyId])
+  @@index([status])
+  @@index([tegraId])
+  @@index([accessKey])
+  @@index([createdAt])
+}
+
+enum InvoiceType {
+  NFE
+  NFCE
+  NFSE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  AUTHORIZED
+  DENIED
+  CANCELLED
+  ERROR
+}
+
+model FiscalDocumentItem {
+  id                String        @id @default(uuid())
+  documentId        String
+  document          FiscalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  productId         String?
+  productName       String
+  productCode       String?
+  
+  quantity          Decimal       @db.Decimal(10, 3)
+  unitPrice         Decimal       @db.Decimal(10, 2)
+  totalPrice        Decimal       @db.Decimal(10, 2)
+  
+  // Tax data
+  ncm               String?
+  cfop              String?
+  cst               String?
+  
+  icmsValue         Decimal?      @db.Decimal(10, 2)
+  pisValue          Decimal?      @db.Decimal(10, 2)
+  cofinsValue       Decimal?      @db.Decimal(10, 2)
+  issValue          Decimal?      @db.Decimal(10, 2)
+  
+  @@index([documentId])
+}
+
+// ============================================
+// FISCAL - EVENTS
+// ============================================
+
+model FiscalEvent {
+  id                String        @id @default(uuid())
+  documentId        String
+  document          FiscalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  type              EventType
+  status            String
+  
+  protocol          String?
+  message           String?
+  errorCode         String?
+  
+  createdAt         DateTime      @default(now())
+  
+  @@index([documentId])
+  @@index([createdAt])
+}
+
+enum EventType {
+  AUTHORIZATION
+  CANCELLATION
+  CORRECTION
+  INUTILIZATION
+  QUERY
+}
+
+// ============================================
+// PRODUCTS
+// ============================================
+
+model Product {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  type              ProductType
+  name              String
+  description       String?
+  sku               String?
+  barcode           String?
+  
+  categoryId        String
+  category          Category      @relation(fields: [categoryId], references: [id])
+  
+  price             Decimal       @db.Decimal(10, 2)
+  costPrice         Decimal?      @db.Decimal(10, 2)
+  
+  stock             Int?
+  minStock          Int?
+  
+  images            String[]
+  
+  isActive          Boolean       @default(true)
+  requiresPreparation Boolean     @default(false)
+  
+  // Fiscal data
+  ncm               String?
+  cest              String?
+  cfop              String?
+  origin            Int?
+  cst               String?
+  
+  icmsRate          Decimal?      @db.Decimal(5, 2)
+  pisRate           Decimal?      @db.Decimal(5, 2)
+  cofinsRate        Decimal?      @db.Decimal(5, 2)
+  issRate           Decimal?      @db.Decimal(5, 2)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  transactionItems  TransactionItem[]
+  
+  @@index([companyId])
+  @@index([barcode])
+  @@index([isActive])
+}
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+}
+
+model Category {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name              String
+  description       String?
+  parentId          String?
+  
+  products          Product[]
+  
+  @@index([companyId])
+}
+
+// ============================================
+// TRANSACTIONS
+// ============================================
+
+model Transaction {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id])
+  
+  type              TransactionType
+  amount            Decimal       @db.Decimal(10, 2)
+  status            TransactionStatus
+  
+  paymentMethod     PaymentMethod
+  
+  customerId        String?
+  customer          Customer?     @relation(fields: [customerId], references: [id])
+  
+  employeeId        String?
+  employee          Employee?     @relation(fields: [employeeId], references: [id])
+  
+  qrCodeId          String?
+  qrCode            QRCode?       @relation(fields: [qrCodeId], references: [id])
+  
+  notes             String?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  items             TransactionItem[]
+  fiscalDocuments   FiscalDocument[]
+  
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum TransactionType {
+  SALE
+  PURCHASE
+  PAYMENT
+  RECEIPT
+}
+
+enum TransactionStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  PIX
+  BANK_TRANSFER
+  CHECK
+}
+
+model TransactionItem {
+  id                String        @id @default(uuid())
+  transactionId     String
+  transaction       Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  
+  productId         String
+  product           Product       @relation(fields: [productId], references: [id])
+  
+  productName       String
+  quantity          Int
+  unitPrice         Decimal       @db.Decimal(10, 2)
+  totalPrice        Decimal       @db.Decimal(10, 2)
+  
+  status            String?
+  requiresPreparation Boolean     @default(false)
+  
+  @@index([transactionId])
+}
+
+// ============================================
+// EMPLOYEES
+// ============================================
+
+model Employee {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id])
+  
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  employeeCode      String        @unique
+  isActive          Boolean       @default(true)
+  
+  permissions       Json
+  
+  hiredAt           DateTime
+  terminatedAt      DateTime?
+  
+  transactions      Transaction[]
+  shifts            Shift[]
+  
+  @@index([companyId])
+  @@index([userId])
+  @@index([employeeCode])
+}
+
+model Shift {
+  id                String        @id @default(uuid())
+  employeeId        String
+  employee          Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  startTime         DateTime
+  endTime           DateTime?
+  
+  locationLat       Decimal?      @db.Decimal(10, 8)
+  locationLng       Decimal?      @db.Decimal(11, 8)
+  
+  totalHours        Decimal?      @db.Decimal(5, 2)
+  
+  breaks            Json?
+  
+  @@index([employeeId])
+  @@index([startTime])
+}
+
+// ============================================
+// CUSTOMERS
+// ============================================
+
+model Customer {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name              String
+  email             String?
+  phone             String?
+  cpfCnpj           String?
+  
+  fiscalType        String        @default("f") // f = pessoa física, j = jurídica
+  
+  loyaltyPoints     Int           @default(0)
+  
+  // Address
+  addressStreet     String?
+  addressNumber     String?
+  addressCity       String?
+  addressState      String?
+  addressZipCode    String?
+  
+  createdAt         DateTime      @default(now())
+  
+  transactions      Transaction[]
+  
+  @@index([companyId])
+  @@index([cpfCnpj])
+}
+
+// ============================================
+// SUPPLIERS
+// ============================================
+
+model Supplier {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name              String
+  cnpj              String
+  email             String
+  phone             String
+  
+  addressStreet     String
+  addressNumber     String
+  addressCity       String
+  addressState      String
+  addressZipCode    String
+  
+  rating            Decimal?      @db.Decimal(3, 2)
+  
+  createdAt         DateTime      @default(now())
+  
+  @@index([companyId])
+}
+
+// ============================================
+// QR CODES
+// ============================================
+
+model QRCode {
+  id                String        @id @default(uuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  type              QRCodeType
+  code              String        @unique
+  
+  pixKey            String?
+  amount            Decimal?      @db.Decimal(10, 2)
+  
+  metadata          Json?
+  
+  isActive          Boolean       @default(true)
+  expiresAt         DateTime?
+  
+  createdAt         DateTime      @default(now())
+  
+  transactions      Transaction[]
+  validations       QRCodeValidation[]
+  
+  @@index([companyId])
+  @@index([code])
+}
+
+enum QRCodeType {
+  PAYMENT
+  TABLE
+  ROOM
+  EMPLOYEE
+}
+
+model QRCodeValidation {
+  id                String        @id @default(uuid())
+  qrCodeId          String
+  qrCode            QRCode        @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  
+  validatedBy       String
+  validatedAt       DateTime      @default(now())
+  
+  transactionId     String?
+  
+  @@index([qrCodeId])
+}
+
+// ============================================
+// PAYMENT CONFIGURATION
+// ============================================
+
+model MercadoPagoConfig {
+  id                String        @id @default(uuid())
+  companyId         String        @unique
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Mercado Pago credentials (encrypted)
+  accessToken       String
+  publicKey         String
+  webhookSecret     String?
+  
+  // Settings
+  enabled           Boolean       @default(false)
+  
+  // Metadata
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([companyId])
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  companyId         String
+  
+  transactionId     String?
+  
+  // Mercado Pago data
+  mpPaymentId       String?       @unique
+  mpPreferenceId    String?
+  
+  amount            Decimal       @db.Decimal(10, 2)
+  status            PaymentStatus @default(PENDING)
+  
+  paymentMethod     String?
+  paymentType       String?
+  
+  // Customer info
+  customerEmail     String?
+  customerName      String?
+  customerCpf       String?
+  
+  // Metadata
+  metadata          Json?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([mpPaymentId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  AUTHORIZED
+  IN_PROCESS
+  IN_MEDIATION
+  REJECTED
+  CANCELLED
+  REFUNDED
+  CHARGED_BACK
+}
+
+// ============================================
+// SUBSCRIPTION PLANS
+// ============================================
+
+model SubscriptionPlan {
+  id                String        @id @default(uuid())
+  name              String
+  description       String
+  price             Decimal       @db.Decimal(10, 2)
+  billingCycle      BillingCycle
+  
+  features          Json
+  
+  maxEmployees      Int
+  maxProducts       Int
+  maxLocations      Int
+  storageGB         Int
+  maxInvoices       Int
+  maxCompanies      Int
+  
+  isActive          Boolean       @default(true)
+  
+  companies         Company[]
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+// ============================================
+// SESSIONS
+// ============================================
+
+model Session {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  token             String        @unique
+  refreshToken      String        @unique
+  
+  expiresAt         DateTime
+  refreshExpiresAt  DateTime
+  
+  ipAddress         String?
+  userAgent         String?
+  
+  createdAt         DateTime      @default(now())
+  
+  @@index([userId])
+  @@index([token])
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id])
+  
+  action            String
+  resource          String?
+  resourceId        String?
+  
+  metadata          Json?
+  ipAddress         String?
+  userAgent         String?
+  
+  createdAt         DateTime      @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

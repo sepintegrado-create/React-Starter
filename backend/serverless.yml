@@ -1,0 +1,400 @@
+service: sepi-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  
+  # Environment variables
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    DATABASE_URL: ${env:DATABASE_URL}
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_REFRESH_SECRET: ${env:JWT_REFRESH_SECRET}
+    
+    # AWS Services
+    AWS_S3_BUCKET: ${self:custom.s3Bucket}
+    AWS_KMS_KEY_ID: ${env:AWS_KMS_KEY_ID}
+    AWS_SQS_QUEUE_URL: !Ref FiscalQueue
+    
+    # Tegra API
+    TEGRA_API_KEY: ${env:TEGRA_API_KEY}
+    TEGRA_ENVIRONMENT: ${env:TEGRA_ENVIRONMENT}
+    
+    # CORS
+    CORS_ORIGIN: ${self:custom.corsOrigin.${self:provider.stage}}
+  
+  # IAM Permissions
+  iam:
+    role:
+      statements:
+        # S3 Permissions
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${self:custom.s3Bucket}
+            - arn:aws:s3:::${self:custom.s3Bucket}/*
+        
+        # KMS Permissions
+        - Effect: Allow
+          Action:
+            - kms:Encrypt
+            - kms:Decrypt
+            - kms:GenerateDataKey
+          Resource: ${env:AWS_KMS_KEY_ARN}
+        
+        # SQS Permissions
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource: !GetAtt FiscalQueue.Arn
+        
+        # CloudWatch Logs
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: '*'
+  
+  # API Gateway
+  apiGateway:
+    shouldStartNameWithService: true
+    minimumCompressionSize: 1024
+
+# Custom variables
+custom:
+  s3Bucket: sepi-${self:provider.stage}-storage
+  
+  corsOrigin:
+    dev: http://localhost:3000
+    staging: https://staging.sepi.pro
+    prod: https://sepi.pro
+  
+  # Serverless plugins
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules: true
+  
+  prune:
+    automatic: true
+    number: 3
+
+# Functions
+functions:
+  # Auth Functions
+  authRegister:
+    handler: src/functions/auth/routes.register
+    events:
+      - http:
+          path: /api/auth/register
+          method: post
+          cors: true
+  
+  authLogin:
+    handler: src/functions/auth/routes.login
+    events:
+      - http:
+          path: /api/auth/login
+          method: post
+          cors: true
+  
+  authRefresh:
+    handler: src/functions/auth/routes.refresh
+    events:
+      - http:
+          path: /api/auth/refresh
+          method: post
+          cors: true
+  
+  authLogout:
+    handler: src/functions/auth/routes.logout
+    events:
+      - http:
+          path: /api/auth/logout
+          method: post
+          cors: true
+  
+  # Company Functions
+  companiesList:
+    handler: src/functions/companies/routes.list
+    events:
+      - http:
+          path: /api/companies
+          method: get
+          cors: true
+  
+  companiesCreate:
+    handler: src/functions/companies/routes.create
+    events:
+      - http:
+          path: /api/companies
+          method: post
+          cors: true
+  
+  companiesGet:
+    handler: src/functions/companies/routes.get
+    events:
+      - http:
+          path: /api/companies/{id}
+          method: get
+          cors: true
+  
+  companiesUpdate:
+    handler: src/functions/companies/routes.update
+    events:
+      - http:
+          path: /api/companies/{id}
+          method: put
+          cors: true
+  
+  companiesDelete:
+    handler: src/functions/companies/routes.delete
+    events:
+      - http:
+          path: /api/companies/{id}
+          method: delete
+          cors: true
+  
+  # Product Functions
+  productsList:
+    handler: src/functions/products/routes.list
+    events:
+      - http:
+          path: /api/companies/{companyId}/products
+          method: get
+          cors: true
+  
+  productsCreate:
+    handler: src/functions/products/routes.create
+    events:
+      - http:
+          path: /api/companies/{companyId}/products
+          method: post
+          cors: true
+  
+  productsUpdate:
+    handler: src/functions/products/routes.update
+    events:
+      - http:
+          path: /api/products/{id}
+          method: put
+          cors: true
+  
+  productsDelete:
+    handler: src/functions/products/routes.delete
+    events:
+      - http:
+          path: /api/products/{id}
+          method: delete
+          cors: true
+  
+  # Fiscal Functions
+  fiscalIssueNFe:
+    handler: src/functions/fiscal/routes.issueNFe
+    timeout: 30
+    events:
+      - http:
+          path: /api/companies/{companyId}/invoices/nfe
+          method: post
+          cors: true
+  
+  fiscalIssueNFCe:
+    handler: src/functions/fiscal/routes.issueNFCe
+    timeout: 30
+    events:
+      - http:
+          path: /api/companies/{companyId}/invoices/nfce
+          method: post
+          cors: true
+  
+  fiscalList:
+    handler: src/functions/fiscal/routes.list
+    events:
+      - http:
+          path: /api/companies/{companyId}/invoices
+          method: get
+          cors: true
+  
+  fiscalGet:
+    handler: src/functions/fiscal/routes.get
+    events:
+      - http:
+          path: /api/invoices/{id}
+          method: get
+          cors: true
+  
+  fiscalCancel:
+    handler: src/functions/fiscal/routes.cancel
+    events:
+      - http:
+          path: /api/invoices/{id}/cancel
+          method: post
+          cors: true
+  
+  fiscalDownloadXML:
+    handler: src/functions/fiscal/routes.downloadXML
+    events:
+      - http:
+          path: /api/invoices/{id}/xml
+          method: get
+          cors: true
+  
+  fiscalDownloadDANFE:
+    handler: src/functions/fiscal/routes.downloadDANFE
+    events:
+      - http:
+          path: /api/invoices/{id}/danfe
+          method: get
+          cors: true
+  
+  # Certificate Functions
+  certificateUpload:
+    handler: src/functions/certificates/routes.upload
+    timeout: 30
+    events:
+      - http:
+          path: /api/companies/{companyId}/certificates/upload
+          method: post
+          cors: true
+  
+  certificateList:
+    handler: src/functions/certificates/routes.list
+    events:
+      - http:
+          path: /api/companies/{companyId}/certificates
+          method: get
+          cors: true
+  
+  certificateDelete:
+    handler: src/functions/certificates/routes.delete
+    events:
+      - http:
+          path: /api/certificates/{id}
+          method: delete
+          cors: true
+  
+  # Platform Configuration Functions
+  platformConfigGet:
+    handler: src/functions/platform/routes.get
+    events:
+      - http:
+          path: /api/platform/config
+          method: get
+          cors: true
+  
+  platformConfigUpdate:
+    handler: src/functions/platform/routes.update
+    events:
+      - http:
+          path: /api/platform/config
+          method: put
+          cors: true
+  
+  # Mercado Pago Functions
+  mercadoPagoGet:
+    handler: src/functions/payments/routes.get
+    events:
+      - http:
+          path: /api/companies/{companyId}/mercadopago
+          method: get
+          cors: true
+  
+  mercadoPagoUpsert:
+    handler: src/functions/payments/routes.upsert
+    events:
+      - http:
+          path: /api/companies/{companyId}/mercadopago
+          method: post
+          cors: true
+  
+  mercadoPagoWebhook:
+    handler: src/functions/payments/routes.webhook
+    events:
+      - http:
+          path: /api/webhooks/mercadopago
+          method: post
+          cors: true
+  
+  # Queue Processor
+  fiscalQueueProcessor:
+    handler: src/functions/fiscal/processor.process
+    timeout: 300
+    reservedConcurrency: 5
+    events:
+      - sqs:
+          arn: !GetAtt FiscalQueue.Arn
+          batchSize: 1
+
+# CloudFormation Resources
+resources:
+  Resources:
+    # S3 Bucket for file storage
+    S3Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.s3Bucket}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - ${self:custom.corsOrigin.${self:provider.stage}}
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+              AllowedHeaders:
+                - '*'
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        VersioningConfiguration:
+          Status: Enabled
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteOldVersions
+              Status: Enabled
+              NoncurrentVersionExpirationInDays: 30
+    
+    # SQS Queue for fiscal processing
+    FiscalQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: sepi-${self:provider.stage}-fiscal-queue
+        VisibilityTimeout: 300
+        MessageRetentionPeriod: 1209600 # 14 days
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt FiscalDLQ.Arn
+          maxReceiveCount: 3
+    
+    # Dead Letter Queue
+    FiscalDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: sepi-${self:provider.stage}-fiscal-dlq
+        MessageRetentionPeriod: 1209600 # 14 days
+    
+    # CloudWatch Log Group
+    ApiLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/sepi-${self:provider.stage}
+        RetentionInDays: 30
+
+# Plugins
+plugins:
+  - serverless-webpack
+  - serverless-offline
+  - serverless-prune-plugin
