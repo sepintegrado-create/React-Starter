@@ -14,7 +14,13 @@ export function Sidebar({ currentPath, isCollapsed, onToggle }: {
     onToggle: () => void;
 }) {
     const { user, currentRole, currentCompany, logout, switchRole } = useAuth();
-    const routes = getRoutesByRole(currentRole);
+
+    // Get routes based on role and permissions
+    const userPermissions = user?.employeeOf && user.employeeOf.length > 0
+        ? user.employeeOf[0].permissions
+        : undefined;
+
+    const routes = getRoutesByRole(currentRole, userPermissions);
 
     const handleSwitchToUser = () => {
         switchRole(UserRole.USER);

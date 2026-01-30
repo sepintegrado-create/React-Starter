@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
     User as UserIcon, Mail, Phone, Shield, Camera, Save, MapPin,
@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { EmployeeRegistrationModal } from '../../components/modals/EmployeeRegistrationModal';
 import { SellerRegistrationModal } from '../../components/modals/SellerRegistrationModal';
+import { db } from '../../services/db';
 
 export function UserProfilePage() {
     const { user, switchRole } = useAuth();
@@ -17,6 +18,8 @@ export function UserProfilePage() {
     const [isEditing, setIsEditing] = useState(false);
     const [showEmployeeModal, setShowEmployeeModal] = useState(false);
     const [showSellerModal, setShowSellerModal] = useState(false);
+    const [employeeData, setEmployeeData] = useState<any>(null);
+    const [companyData, setCompanyData] = useState<Record<string, any>>({});
 
     const [profileData, setProfileData] = useState({
         name: user?.name || '',
@@ -80,6 +83,26 @@ export function UserProfilePage() {
         console.log('Saving privacy:', privacySettings);
         // TODO: Integrate with API
     };
+
+    // Fetch employee and company data
+    useEffect(() => {
+        if (user?.employeeCode) {
+            const employee = db.getEmployeeByCode(user.employeeCode);
+            setEmployeeData(employee);
+        }
+
+        // Fetch company data for all employeeOf links
+        if (user?.employeeOf && user.employeeOf.length > 0) {
+            const companies: Record<string, any> = {};
+            user.employeeOf.forEach(link => {
+                const company = db.getCompanyById(link.companyId);
+                if (company) {
+                    companies[link.companyId] = company;
+                }
+            });
+            setCompanyData(companies);
+        }
+    }, [user]);
 
     const tabs = [
         { id: 'profile', label: 'Perfil', icon: UserIcon },
@@ -298,26 +321,34 @@ export function UserProfilePage() {
                                         <CardContent className="space-y-4">
                                             {user?.employeeOf && user.employeeOf.length > 0 ? (
                                                 <div className="space-y-3">
-                                                    {user.employeeOf.map((link, idx) => (
-                                                        <div key={idx} className="flex items-center justify-between p-4 bg-white rounded-xl border border-blue-100 shadow-sm">
-                                                            <div className="flex items-center gap-4">
-                                                                <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white">
-                                                                    <Building2 className="w-5 h-5" />
+                                                    {user.employeeOf.map((link, idx) => {
+                                                        const company = companyData[link.companyId];
+                                                        const companyName = company?.tradeName || `Empresa ID: ${link.companyId}`;
+                                                        const role = employeeData?.role || 'Colaborador';
+
+                                                        return (
+                                                            <div key={idx} className="flex items-center justify-between p-4 bg-white rounded-xl border border-blue-100 shadow-sm">
+                                                                <div className="flex items-center gap-4">
+                                                                    <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+                                                                        <Building2 className="w-5 h-5" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="font-bold text-sm">{companyName}</p>
+                                                                        <p className="text-[10px] text-muted-foreground uppercase font-black">
+                                                                            Função: {role} • Ativo desde {new Date(link.hiredAt).toLocaleDateString()}
+                                                                        </p>
+                                                                    </div>
                                                                 </div>
-                                                                <div>
-                                                                    <p className="font-bold text-sm">Empresa ID: {link.companyId}</p>
-                                                                    <p className="text-[10px] text-muted-foreground uppercase font-black">Função: Colaborador • Ativo desde {new Date(link.hiredAt).toLocaleDateString()}</p>
-                                                                </div>
+                                                                <Button
+                                                                    size="sm"
+                                                                    className="bg-blue-600 hover:bg-blue-700 text-white border-none"
+                                                                    onClick={() => switchRole('EMPLOYEE' as any, link.companyId)}
+                                                                >
+                                                                    Assumir Função
+                                                                </Button>
                                                             </div>
-                                                            <Button
-                                                                size="sm"
-                                                                className="bg-blue-600 hover:bg-blue-700 text-white border-none"
-                                                                onClick={() => switchRole('EMPLOYEE' as any, link.companyId)}
-                                                            >
-                                                                Assumir Função
-                                                            </Button>
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             ) : (
                                                 <div className="p-4 bg-white/60 border border-dashed border-blue-200 rounded-xl text-center">

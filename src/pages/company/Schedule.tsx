@@ -1,310 +1,455 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Bell, Calendar as CalendarIcon, Clock, User, Phone, Search, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+    Plus,
+    ChevronLeft,
+    ChevronRight,
+    Search,
+    Calendar as CalendarIcon,
+    Lock,
+    Filter,
+    Users,
+    ChevronDown,
+    MoreVertical,
+    Clock,
+    Trash2
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, Appointment, Client } from '../../services/db';
-import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { db, Appointment, Employee, Client } from '../../services/db';
+import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { SchedulingModal } from '../../components/modals/SchedulingModal';
+import { AppointmentDetailsModal } from '../../components/modals/AppointmentDetailsModal';
 
 export function SchedulePage() {
+    const { currentCompany } = useAuth();
     const [appointments, setAppointments] = useState<Appointment[]>([]);
-    const [clients, setClients] = useState<Client[]>([]);
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+    const [employees, setEmployees] = useState<Employee[]>([]);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [showSchedulingModal, setShowSchedulingModal] = useState(false);
+    const [showDetailsModal, setShowDetailsModal] = useState(false);
+    const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [visibleProfessionals, setVisibleProfessionals] = useState<string[]>([]);
+    const [selectedProfessionalId, setSelectedProfessionalId] = useState<string | undefined>(undefined);
 
-    // Form state
-    const [newApp, setNewApp] = useState({
-        clientName: '',
-        clientId: '',
-        date: new Date().toISOString().split('T')[0],
-        time: '14:00',
-        description: ''
-    });
+    // Time slots from 08:00 to 20:00 (30 min intervals)
+    const timeSlots = [];
+    for (let h = 8; h <= 20; h++) {
+        timeSlots.push(`${String(h).padStart(2, '0')}:00`);
+        if (h < 20) timeSlots.push(`${String(h).padStart(2, '0')}:30`);
+    }
 
     useEffect(() => {
-        setAppointments(db.getAppointments());
-        setClients(db.getClients());
-    }, []);
+        if (currentCompany) {
+            const empList = db.getEmployees(currentCompany.id);
+            setEmployees(empList);
 
-    const handleAddAppointment = () => {
-        const appointment: Appointment = {
-            id: Date.now().toString(),
-            clientId: newApp.clientId || 'guest',
-            clientName: newApp.clientName,
-            date: newApp.date,
-            time: newApp.time,
-            description: newApp.description,
-            status: 'scheduled',
-            notified: false
+            // Handle pre-selected employee from URL
+            const hash = window.location.hash;
+            const params = new URLSearchParams(hash.split('?')[1]);
+            const preSelectedId = params.get('employeeId');
+
+            if (preSelectedId && empList.some(e => e.id === preSelectedId)) {
+                setVisibleProfessionals([preSelectedId]);
+            } else {
+                setVisibleProfessionals(empList.map(e => e.id));
+            }
+            refreshData();
+        }
+    }, [currentCompany]);
+
+    useEffect(() => {
+        const handleHashChange = () => {
+            if (currentCompany) {
+                const empList = db.getEmployees(currentCompany.id);
+                const hash = window.location.hash;
+                const params = new URLSearchParams(hash.split('?')[1]);
+                const preSelectedId = params.get('employeeId');
+
+                if (preSelectedId && empList.some(e => e.id === preSelectedId)) {
+                    setVisibleProfessionals([preSelectedId]);
+                } else {
+                    setVisibleProfessionals(empList.map(e => e.id));
+                }
+            }
         };
-        db.addAppointment(appointment);
-        setAppointments(db.getAppointments());
-        setShowAddModal(false);
-        setNewApp({
-            clientName: '',
-            clientId: '',
-            date: new Date().toISOString().split('T')[0],
-            time: '14:00',
-            description: ''
-        });
-    };
 
-    const handleStatusChange = (app: Appointment, newStatus: Appointment['status']) => {
-        const updated = { ...app, status: newStatus };
-        db.updateAppointment(updated);
+        window.addEventListener('hashchange', handleHashChange);
+        return () => window.removeEventListener('hashchange', handleHashChange);
+    }, [currentCompany, employees]);
+    const refreshData = () => {
         setAppointments(db.getAppointments());
     };
 
-    const filteredAppointments = appointments.filter(a =>
-        a.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.description.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const getAppointmentsForEmployee = (empId: string, date: string) => {
+        return appointments.filter(app =>
+            app.date === date &&
+            app.services.some(s => s.employeeId === empId)
+        );
+    };
 
-    const upcomingCount = appointments.filter(a => a.status === 'scheduled').length;
+    const toggleProfessional = (id: string) => {
+        setVisibleProfessionals(prev =>
+            prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
+        );
+    };
+
+    const handleClearDay = () => {
+        if (window.confirm(`Deseja realmente excluir TODOS os agendamentos do dia ${selectedDate}? Esta ação não pode ser desfeita.`)) {
+            db.deleteAppointmentsByDate(selectedDate);
+            refreshData();
+        }
+    };
+
+    // Calendar helper
+    const getDaysInMonth = (year: number, month: number) => {
+        const date = new Date(year, month, 1);
+        const days = [];
+        while (date.getMonth() === month) {
+            days.push(new Date(date));
+            date.setDate(date.getDate() + 1);
+        }
+        return days;
+    };
+
+    // Render calendar
+    const renderCalendar = () => {
+        const now = new Date(selectedDate);
+        const days = getDaysInMonth(now.getFullYear(), now.getMonth());
+        const startDay = days[0].getDay();
+        const padding = Array(startDay).fill(null);
+
+        const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+        return (
+            <div className="bg-card rounded-xl border p-4">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-sm">{monthNames[now.getMonth()]} {now.getFullYear()}</h3>
+                    <div className="flex gap-1">
+                        <button className="p-1 hover:bg-muted rounded"><ChevronLeft className="w-4 h-4" /></button>
+                        <button className="p-1 hover:bg-muted rounded"><ChevronRight className="w-4 h-4" /></button>
+                    </div>
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-muted-foreground uppercase mb-2">
+                    {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => <div key={d}>{d}</div>)}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                    {padding.map((_, i) => <div key={`p-${i}`} />)}
+                    {days.map(d => {
+                        const dateStr = d.toISOString().split('T')[0];
+                        const isSelected = dateStr === selectedDate;
+                        const isToday = dateStr === new Date().toISOString().split('T')[0];
+
+                        return (
+                            <button
+                                key={dateStr}
+                                onClick={() => setSelectedDate(dateStr)}
+                                className={`
+                                    w-7 h-7 rounded-full text-xs flex items-center justify-center transition-colors
+                                    ${isSelected ? 'bg-primary text-primary-foreground font-bold' :
+                                        isToday ? 'border border-primary text-primary' : 'hover:bg-muted'}
+                                `}
+                            >
+                                {d.getDate()}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
 
     return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Agenda</h1>
-                    <p className="text-muted-foreground mt-1">Gerencie seus compromissos e histórico de clientes</p>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="relative">
-                        <Bell className="w-6 h-6 text-muted-foreground" />
-                        {upcomingCount > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                                {upcomingCount}
-                            </span>
-                        )}
-                    </div>
-                    <Button onClick={() => setShowAddModal(true)} className="flex items-center gap-2">
-                        <Plus className="w-4 h-4" /> Novo Agendamento
-                    </Button>
+        <div className="flex flex-col h-[calc(100vh-120px)]">
+            <div className="mb-6 flex justify-between items-center">
+                <h1 className="text-3xl font-black tracking-tighter uppercase text-primary">Agenda</h1>
+                <div className="flex items-center gap-4 text-xs font-bold text-muted-foreground">
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-primary" /> Regular</span>
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-400" /> Encaixe</span>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* List of Appointments */}
-                <Card className="lg:col-span-2">
-                    <CardHeader>
+            {/* Main Layout Split */}
+            <div className="flex flex-1 overflow-hidden gap-6">
+
+                {/* Left Sidebar */}
+                <aside className="w-64 flex flex-col gap-6 overflow-y-auto pr-2">
+                    {renderCalendar()}
+
+                    <div className="bg-card rounded-xl border p-4 flex flex-col gap-4">
                         <div className="flex items-center justify-between">
-                            <CardTitle>Compromissos</CardTitle>
-                            <div className="flex items-center gap-2 max-w-xs">
-                                <Search className="w-4 h-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Buscar agendamento..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="h-9"
-                                />
-                            </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4">
-                            {filteredAppointments.length === 0 ? (
-                                <div className="text-center py-12 text-muted-foreground">
-                                    Nenhum agendamento encontrado.
-                                </div>
-                            ) : (
-                                filteredAppointments.map(app => (
-                                    <div key={app.id} className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-muted/30 transition-all group">
-                                        <div className="flex items-center gap-4">
-                                            <div className={`p-3 rounded-lg ${app.status === 'scheduled' ? 'bg-primary/10 text-primary' :
-                                                app.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                    'bg-red-100 text-red-700'
-                                                }`}>
-                                                <CalendarIcon className="w-5 h-5" />
-                                            </div>
-                                            <div>
-                                                <p className="font-semibold text-lg">{app.clientName}</p>
-                                                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                                                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {app.time}</span>
-                                                    <span>•</span>
-                                                    <span>{app.date}</span>
-                                                </div>
-                                                <p className="text-sm mt-1 text-muted-foreground">{app.description}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            {app.status === 'scheduled' && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleStatusChange(app, 'completed')}
-                                                        className="p-2 hover:bg-green-100 rounded-full text-green-600 transition-colors"
-                                                        title="Concluir"
-                                                    >
-                                                        <CheckCircle2 className="w-5 h-5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleStatusChange(app, 'cancelled')}
-                                                        className="p-2 hover:bg-red-100 rounded-full text-red-600 transition-colors"
-                                                        title="Cancelar"
-                                                    >
-                                                        <AlertCircle className="w-5 h-5" />
-                                                    </button>
-                                                </>
-                                            )}
-                                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${app.status === 'scheduled' ? 'bg-primary/20 text-primary' :
-                                                app.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                    'bg-red-100 text-red-700'
-                                                }`}>
-                                                {app.status === 'scheduled' ? 'Agendado' :
-                                                    app.status === 'completed' ? 'Concluído' : 'Cancelado'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))
+                            <h3 className="font-bold text-sm tracking-tight flex items-center gap-2">
+                                <Users className="w-4 h-4" /> Profissionais
+                            </h3>
+                            {window.location.hash.includes('employeeId=') && (
+                                <button
+                                    onClick={() => window.location.hash = '#/company/schedule'}
+                                    className="text-[10px] text-primary font-bold hover:underline"
+                                >
+                                    Ver Todos
+                                </button>
                             )}
                         </div>
-                    </CardContent>
-                </Card>
 
-                {/* Client History Shortcut / Statistics */}
-                <div className="space-y-6">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Detalhes do Cliente</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium">Selecionar Cliente</label>
-                                    <select
-                                        className="w-full p-2 rounded-lg border border-border bg-background text-sm"
-                                        onChange={(e) => {
-                                            const client = clients.find(c => c.id === e.target.value);
-                                            setSelectedClient(client || null);
-                                        }}
-                                        value={selectedClient?.id || ''}
-                                    >
-                                        <option value="">Selecione um cliente...</option>
-                                        {clients.map(c => (
-                                            <option key={c.id} value={c.id}>{c.name}</option>
-                                        ))}
-                                    </select>
+                        <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                            <input
+                                placeholder="Pesquisar profissional"
+                                className="w-full pl-7 pr-3 py-1.5 text-xs bg-muted/50 rounded-lg border-none focus:ring-1 focus:ring-primary"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer py-1">
+                                <input
+                                    type="checkbox"
+                                    checked={visibleProfessionals.length === employees.length}
+                                    onChange={() => setVisibleProfessionals(
+                                        visibleProfessionals.length === employees.length ? [] : employees.map(e => e.id)
+                                    )}
+                                    className="w-3.5 h-3.5 rounded border-gray-300 text-primary"
+                                />
+                                Todos
+                            </label>
+
+                            <div className="space-y-1">
+                                <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase pt-2">
+                                    <ChevronDown className="w-3 h-3" /> Integrantes
                                 </div>
-
-                                {selectedClient ? (
-                                    <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-                                        <div className="p-4 rounded-xl bg-primary/5 border border-primary/10">
-                                            <div className="flex items-center gap-3 mb-2">
-                                                <User className="w-5 h-5 text-primary" />
-                                                <span className="font-bold">{selectedClient.name}</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                                                <Phone className="w-4 h-4" />
-                                                <span>{selectedClient.phone}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <h4 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Histórico de Serviços</h4>
-                                            <div className="space-y-2">
-                                                {selectedClient.serviceHistory.length === 0 ? (
-                                                    <p className="text-xs text-muted-foreground italic">Nenhum serviço registrado.</p>
-                                                ) : (
-                                                    selectedClient.serviceHistory.map(history => (
-                                                        <div key={history.id} className="p-3 bg-muted/50 rounded-lg text-xs border border-border">
-                                                            <div className="flex justify-between font-bold mb-1">
-                                                                <span>{history.description}</span>
-                                                                <span className="text-primary">R$ {history.amount.toFixed(2)}</span>
-                                                            </div>
-                                                            <div className="text-muted-foreground">{history.date}</div>
-                                                        </div>
-                                                    ))
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="p-4 rounded-xl bg-muted/50 border border-dashed border-border text-center">
-                                        <p className="text-sm text-muted-foreground">Selecione um cliente para ver o histórico completo.</p>
-                                    </div>
-                                )}
-
-                                <div className="pt-4 border-t space-y-3">
-                                    <h4 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Próximos Avisos</h4>
-                                    {appointments.filter(a => a.status === 'scheduled').slice(0, 3).map(app => (
-                                        <div key={app.id} className="p-3 bg-yellow-50 border border-yellow-100 rounded-lg flex items-start gap-3">
-                                            <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-bold text-yellow-900">{app.clientName}</p>
-                                                <p className="text-xs text-yellow-700">{app.date} às {app.time}</p>
-                                            </div>
-                                        </div>
+                                {employees
+                                    .filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                                    .filter(e => {
+                                        const hash = window.location.hash;
+                                        const params = new URLSearchParams(hash.split('?')[1]);
+                                        const preSelectedId = params.get('employeeId');
+                                        return !preSelectedId || e.id === preSelectedId;
+                                    })
+                                    .map(emp => (
+                                        <label key={emp.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/50 p-1 rounded-md">
+                                            <input
+                                                type="checkbox"
+                                                checked={visibleProfessionals.includes(emp.id)}
+                                                onChange={() => toggleProfessional(emp.id)}
+                                                className="w-3.5 h-3.5 rounded border-gray-300 text-primary"
+                                            />
+                                            <div className="w-2 h-2 rounded-full bg-primary/40" />
+                                            {emp.name}
+                                        </label>
                                     ))}
-                                </div>
                             </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                        </div>
+                    </div>
+                </aside>
+
+                {/* Main Agenda Grid */}
+                <main className="flex-1 flex flex-col bg-card rounded-2xl border shadow-sm overflow-hidden min-w-0">
+
+                    {/* Grid Toolbar */}
+                    <div className="p-4 border-b flex items-center justify-between bg-white sticky top-0 z-10">
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-9 px-4 font-bold"
+                                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                            >
+                                Hoje
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-9 px-4 font-bold flex items-center gap-2">
+                                <Lock className="w-4 h-4" /> Bloquear Horário
+                            </Button>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg border">
+                                <button className="px-3 py-1.5 text-xs font-bold rounded-md bg-white shadow-sm border">Dia</button>
+                                <button className="px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-white/50 rounded-md">Semana</button>
+                                <button className="px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-white/50 rounded-md">Mês</button>
+                            </div>
+
+                            <Button
+                                variant="outline"
+                                onClick={handleClearDay}
+                                className="h-9 px-4 border-red-200 text-red-600 hover:bg-red-50 font-bold flex items-center gap-2"
+                            >
+                                <Trash2 className="w-4 h-4" /> Limpar Agenda
+                            </Button>
+
+                            <Button onClick={() => {
+                                setSelectedAppointment(null);
+                                setSelectedProfessionalId(undefined);
+                                setShowSchedulingModal(true);
+                            }} className="h-9 px-6 bg-primary font-bold shadow-lg shadow-primary/20">
+                                <Plus className="w-4 h-4 mr-2" /> Novo Agendamento
+                            </Button>
+                        </div>
+                    </div>
+
+                    {/* Actual Grid */}
+                    <div className="flex-1 overflow-auto relative">
+                        <div className="flex h-full min-w-max">
+
+                            {/* Time Axis */}
+                            <div className="w-16 sticky left-0 z-20 bg-white border-r">
+                                <div className="h-16 border-b" /> {/* Spacer for header */}
+                                {timeSlots.map(time => (
+                                    <div key={time} className="h-12 border-b flex justify-center text-[10px] font-bold text-muted-foreground pt-1">
+                                        {time.endsWith(':00') ? time : ''}
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Professionals Columns */}
+                            {employees.filter(e => visibleProfessionals.includes(e.id)).map(emp => (
+                                <div key={emp.id} className="w-48 border-r min-h-full flex flex-col">
+                                    {/* Professional Header */}
+                                    <div className="h-16 border-b p-3 bg-muted/10 sticky top-0 z-10 flex flex-col items-center justify-center gap-1 group">
+                                        <div className="w-8 h-8 rounded-full bg-primary/20 overflow-hidden border border-primary/10 flex items-center justify-center text-primary font-bold text-xs ring-2 ring-transparent group-hover:ring-primary/20 transition-all">
+                                            {emp.name.charAt(0)}
+                                        </div>
+                                        <span className="text-[10px] font-black uppercase tracking-wider truncate w-full text-center">
+                                            {emp.name.split(' ')[0]}
+                                        </span>
+                                    </div>
+
+                                    {/* Column Cells */}
+                                    <div className="relative group/col">
+                                        {timeSlots.map(time => (
+                                            <div
+                                                key={time}
+                                                className="h-12 border-b group/cell relative cursor-pointer hover:bg-primary/5 transition-colors"
+                                                onClick={() => {
+                                                    setSelectedAppointment(null);
+                                                    setSelectedProfessionalId(emp.id);
+                                                    setShowSchedulingModal(true);
+                                                }}
+                                            >
+                                                <div className="absolute inset-x-0 top-0 h-px bg-muted opacity-0 group-hover/cell:opacity-100" />
+                                            </div>
+                                        ))}
+
+                                        {/* Appointments Overlay */}
+                                        {(() => {
+                                            const empServices = getAppointmentsForEmployee(emp.id, selectedDate)
+                                                .flatMap(app => app.services
+                                                    .filter(s => s.employeeId === emp.id)
+                                                    .map(s => ({
+                                                        ...s,
+                                                        appId: app.id,
+                                                        appIsForcedFit: app.isForcedFit,
+                                                        appClientName: app.clientName,
+                                                        appStatus: app.status
+                                                    }))
+                                                )
+                                                .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+                                            // Simple overlap algorithm
+                                            const columns: any[][] = [];
+                                            empServices.forEach(service => {
+                                                let placed = false;
+                                                for (let i = 0; i < columns.length; i++) {
+                                                    const lastInCol = columns[i][columns[i].length - 1];
+                                                    if (service.startTime >= lastInCol.endTime) {
+                                                        columns[i].push(service);
+                                                        placed = true;
+                                                        break;
+                                                    }
+                                                }
+                                                if (!placed) {
+                                                    columns.push([service]);
+                                                }
+                                            });
+
+                                            return columns.flatMap((col, colIdx) =>
+                                                col.map(service => {
+                                                    const [startH, startM] = service.startTime.split(':').map(Number);
+                                                    const startMinutesTotal = (startH * 60) + startM;
+                                                    const baseDayMinutes = (8 * 60); // 08:00
+                                                    const topPos = ((startMinutesTotal - baseDayMinutes) / 30) * 48;
+                                                    const height = (service.duration / 30) * 48;
+
+                                                    const widthPercent = 100 / columns.length;
+                                                    const leftPercent = colIdx * widthPercent;
+
+                                                    return (
+                                                        <motion.div
+                                                            key={service.id}
+                                                            initial={{ opacity: 0, scale: 0.9 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const originalApp = appointments.find(a => a.id === service.appId);
+                                                                if (originalApp) {
+                                                                    setSelectedAppointment(originalApp);
+                                                                    setShowDetailsModal(true);
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                top: `${topPos + 4}px`,
+                                                                height: `${height - 8}px`,
+                                                                left: `${leftPercent}%`,
+                                                                width: `calc(${widthPercent}% - 4px)`
+                                                            }}
+                                                            className={`
+                                                                absolute rounded-lg p-1 shadow-sm border-l-2 overflow-hidden group/app z-10
+                                                                ${service.appIsForcedFit ? 'bg-orange-50 border-orange-400' : 'bg-primary/10 border-primary shadow-primary/5'}
+                                                                ${(service.appStatus === 'completed' || service.appStatus === 'cancelled') ? 'opacity-50 grayscale' : 'hover:scale-[1.02]'}
+                                                                transition-all cursor-pointer
+                                                            `}
+                                                        >
+                                                            <div className="flex justify-between items-start">
+                                                                <span className="text-[8px] font-bold text-primary flex items-center gap-1">
+                                                                    <Clock className="w-1.5 h-1.5" /> {service.startTime}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[9px] font-black leading-tight truncate">{service.appClientName}</p>
+                                                            <p className="text-[7px] font-bold text-muted-foreground truncate uppercase">{service.serviceName}</p>
+
+                                                            {service.appIsForcedFit && (
+                                                                <div className="absolute bottom-0.5 right-0.5 text-[6px] bg-orange-400 text-white px-0.5 rounded-sm font-bold uppercase">
+                                                                    E
+                                                                </div>
+                                                            )}
+                                                        </motion.div>
+                                                    );
+                                                })
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </main>
             </div>
 
-            {/* Add Appointment Modal */}
-            <AnimatePresence>
-                {showAddModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setShowAddModal(false)}
-                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                        />
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="relative w-full max-w-md bg-card rounded-3xl shadow-2xl overflow-hidden"
-                        >
-                            <div className="p-8 space-y-6">
-                                <h2 className="text-2xl font-black">Novo Agendamento</h2>
+            <SchedulingModal
+                isOpen={showSchedulingModal}
+                onClose={() => {
+                    setShowSchedulingModal(false);
+                    setSelectedAppointment(null);
+                    setSelectedProfessionalId(undefined);
+                }}
+                selectedDate={selectedDate}
+                onSave={refreshData}
+                appointment={selectedAppointment}
+                initialEmployeeId={selectedProfessionalId}
+            />
 
-                                <div className="space-y-4">
-                                    <Input
-                                        label="Nome do Cliente"
-                                        placeholder="Ex: João Silva"
-                                        value={newApp.clientName}
-                                        onChange={(e) => setNewApp({ ...newApp, clientName: e.target.value })}
-                                    />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Input
-                                            label="Data"
-                                            type="date"
-                                            value={newApp.date}
-                                            onChange={(e) => setNewApp({ ...newApp, date: e.target.value })}
-                                        />
-                                        <Input
-                                            label="Hora"
-                                            type="time"
-                                            value={newApp.time}
-                                            onChange={(e) => setNewApp({ ...newApp, time: e.target.value })}
-                                        />
-                                    </div>
-                                    <Input
-                                        label="Descrição do Serviço"
-                                        placeholder="Ex: Consultoria Técnica"
-                                        value={newApp.description}
-                                        onChange={(e) => setNewApp({ ...newApp, description: e.target.value })}
-                                    />
-                                </div>
-
-                                <div className="flex gap-3">
-                                    <Button variant="outline" className="flex-1" onClick={() => setShowAddModal(false)}>
-                                        Cancelar
-                                    </Button>
-                                    <Button className="flex-1" onClick={handleAddAppointment} disabled={!newApp.clientName}>
-                                        Agendar
-                                    </Button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
+            <AppointmentDetailsModal
+                isOpen={showDetailsModal}
+                onClose={() => setShowDetailsModal(false)}
+                appointment={selectedAppointment}
+                onAction={refreshData}
+                onReschedule={(app) => {
+                    setShowDetailsModal(false);
+                    setSelectedAppointment(app);
+                    setShowSchedulingModal(true);
+                }}
+            />
         </div>
     );
 }

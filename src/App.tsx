@@ -14,8 +14,12 @@ import { PublicOrderPage } from './pages/public/Order';
 import { SchedulePage } from './pages/company/Schedule';
 import { CustomersPage } from './pages/company/Customers';
 import { TrackOrderPage } from './pages/TrackOrder';
+import CategoriesPage from './pages/company/Categories';
+import FunctionsPage from './pages/company/Functions';
+import { PermissionsManager } from './pages/company/PermissionsManager';
 import { PackageSettingsPage } from './pages/admin/Packages';
 import { Register } from './pages/auth/Register';
+import { RegisterTest } from './pages/auth/RegisterTest';
 import { RegisterCompany } from './pages/auth/RegisterCompany';
 import { PaymentPage } from './pages/auth/Payment';
 import { AdminContractsPage } from './pages/admin/AdminContracts';
@@ -66,12 +70,23 @@ function AppContent() {
   }, []);
 
   // Public Routes (No Auth Required)
+  const rawPath = currentPath.split('?')[0];
+  const pathWithoutQuery = rawPath.startsWith('/') ? rawPath : '/' + rawPath;
+
+  if (pathWithoutQuery === '/profile') {
+    return <PublicProfilePage />;
+  }
+
   if (currentPath.startsWith('/order/')) {
     return <PublicOrderPage />;
   }
 
   if (currentPath === '/register') {
     return <Register />;
+  }
+
+  if (currentPath === '/register-test') {
+    return <RegisterTest />;
   }
 
   if (currentPath === '/register-company') {
@@ -104,70 +119,37 @@ function AppContent() {
 
   // Company Admin routes
   if (currentRole === UserRole.COMPANY_ADMIN) {
-    switch (currentPath) {
-      case '/company/products':
-        PageComponent = ProductsPage;
-        break;
-      case '/company/employees':
-        PageComponent = EmployeesPage;
-        break;
-      case '/company/qrcode':
-        PageComponent = QRCodePage;
-        break;
-      case '/company/pdv':
-        PageComponent = PDVPage;
-        break;
-      case '/company/hardware':
-        PageComponent = HardwareSettingsPage;
-        break;
-      case '/company/public-profile':
-        PageComponent = CompanyPublicProfileSettingsPage;
-        break;
-      case '/company/settings':
-        PageComponent = SettingsPage;
-        break;
-      case '/company/inventory':
-        PageComponent = InventoryPage;
-        break;
-      case '/company/financial':
-        PageComponent = FinancialPage;
-        break;
-      case '/company/schedule':
-        PageComponent = SchedulePage;
-        break;
-      case '/company/customers':
-        PageComponent = CustomersPage;
-        break;
-      case '/company/fiscal':
-        PageComponent = FiscalSettings;
-        break;
-      case '/company/invoices':
-        PageComponent = Invoices;
-        break;
-      case '/company/suppliers':
-        PageComponent = SuppliersPage;
-        break;
-      case '/company/reports':
-        PageComponent = ReportsPage;
-        break;
-      case '/company/operational':
-        PageComponent = OperationalSettingsPage;
-        break;
-      case '/company/track-order':
-        PageComponent = TrackOrderPage;
-        break;
+    const companyPath = pathWithoutQuery;
+    switch (companyPath) {
+      case '/company/products': PageComponent = ProductsPage; break;
+      case '/company/employees': PageComponent = EmployeesPage; break;
+      case '/company/qrcode': PageComponent = QRCodePage; break;
+      case '/company/pdv': PageComponent = PDVPage; break;
+      case '/company/hardware': PageComponent = HardwareSettingsPage; break;
+      case '/company/public-profile': PageComponent = CompanyPublicProfileSettingsPage; break;
+      case '/company/settings': PageComponent = SettingsPage; break;
+      case '/company/inventory': PageComponent = InventoryPage; break;
+      case '/company/financial': PageComponent = FinancialPage; break;
+      case '/company/schedule': PageComponent = SchedulePage; break;
+      case '/company/customers': PageComponent = CustomersPage; break;
+      case '/company/fiscal': PageComponent = FiscalSettings; break;
+      case '/company/invoices': PageComponent = Invoices; break;
+      case '/company/suppliers': PageComponent = SuppliersPage; break;
+      case '/company/reports': PageComponent = ReportsPage; break;
+      case '/company/categories': PageComponent = CategoriesPage; break;
+      case '/company/functions': PageComponent = FunctionsPage; break;
+      case '/company/permissions': PageComponent = PermissionsManager; break;
+      case '/company/operational': PageComponent = OperationalSettingsPage; break;
+      case '/company/track-order': PageComponent = TrackOrderPage; break;
       case '/company/profile-settings':
-      case '/company/profile':
-        PageComponent = UserProfilePage;
-        break;
-      case '/company':
-      default:
-        PageComponent = React.lazy(() => import('./pages/company/Dashboard').then(m => ({ default: m.CompanyDashboard })));
+      case '/company/profile': PageComponent = UserProfilePage; break;
+      case '/company': PageComponent = React.lazy(() => import('./pages/company/Dashboard').then(m => ({ default: m.CompanyDashboard }))); break;
+      default: PageComponent = React.lazy(() => import('./pages/company/Dashboard').then(m => ({ default: m.CompanyDashboard })));
     }
   }
   // Platform Admin routes
   else if (currentRole === UserRole.PLATFORM_ADMIN) {
-    switch (currentPath) {
+    switch (pathWithoutQuery) {
       case '/admin/plans':
         PageComponent = PackageSettingsPage;
         break;
@@ -213,7 +195,7 @@ function AppContent() {
       case '/admin':
       default:
         // Handle dynamic seller profile route
-        if (currentPath.startsWith('/admin/seller/')) {
+        if (pathWithoutQuery.startsWith('/admin/seller/')) {
           PageComponent = AdminSellerProfilePage;
         } else {
           PageComponent = React.lazy(() => import('./pages/admin/Dashboard').then(m => ({ default: m.AdminDashboard })));
@@ -222,9 +204,12 @@ function AppContent() {
   }
   // Employee routes
   else if (currentRole === UserRole.EMPLOYEE) {
-    switch (currentPath) {
+    switch (pathWithoutQuery) {
       case '/employee/pdv':
         PageComponent = PDVPage;
+        break;
+      case '/employee/schedule':
+        PageComponent = SchedulePage;
         break;
       case '/employee/qrcode':
         PageComponent = QRCodePage;
@@ -232,11 +217,60 @@ function AppContent() {
       case '/employee/orders':
         PageComponent = ProductsPage;
         break;
+      case '/employee/categories':
+        PageComponent = CategoriesPage;
+        break;
+      case '/employee/inventory':
+        PageComponent = InventoryPage;
+        break;
+      case '/employee/financial':
+        PageComponent = FinancialPage;
+        break;
       case '/employee/track-order':
         PageComponent = TrackOrderPage;
         break;
+      case '/employee/customers':
+        PageComponent = CustomersPage;
+        break;
+      case '/employee/suppliers':
+        PageComponent = SuppliersPage;
+        break;
+      case '/employee/team':
+        PageComponent = EmployeesPage;
+        break;
+      case '/employee/functions':
+        PageComponent = FunctionsPage;
+        break;
+      case '/employee/reports':
+        PageComponent = ReportsPage;
+        break;
+      case '/employee/fiscal':
+        PageComponent = FiscalSettings;
+        break;
+      case '/employee/history':
+        PageComponent = UserOrderHistoryPage;
+        break;
+      case '/employee/contracts':
+        PageComponent = AdminContractsPage; // Shared component
+        break;
+      case '/employee/hardware':
+        PageComponent = HardwareSettingsPage;
+        break;
+      case '/employee/public-profile':
+        PageComponent = CompanyPublicProfileSettingsPage;
+        break;
+      case '/employee/settings':
+        PageComponent = SettingsPage;
+        break;
       case '/employee/profile':
+      case '/employee/profile-settings':
         PageComponent = UserProfilePage;
+        break;
+      case '/employee/communication':
+        PageComponent = React.lazy(() => import('./pages/employee/Dashboard').then(m => ({ default: m.EmployeeDashboard }))); // Placeholder
+        break;
+      case '/employee/shift':
+        PageComponent = PDVPage; // Common pattern: shift management inside PDV
         break;
       case '/auth/register-company':
         PageComponent = RegisterCompany;
@@ -244,14 +278,14 @@ function AppContent() {
       case '/auth/payment':
         PageComponent = PaymentPage;
         break;
-      case '/employee/shift':
+      case '/employee':
       default:
         PageComponent = React.lazy(() => import('./pages/employee/Dashboard').then(m => ({ default: m.EmployeeDashboard })));
     }
   }
   // Seller routes
   else if (currentRole === UserRole.SELLER) {
-    switch (currentPath) {
+    switch (pathWithoutQuery) {
       case '/seller/packages':
         PageComponent = SellerPackages;
         break;
@@ -271,7 +305,7 @@ function AppContent() {
   }
   // User routes
   else {
-    switch (currentPath) {
+    switch (pathWithoutQuery) {
       case '/user/track-order':
         PageComponent = TrackOrderPage;
         break;
@@ -299,9 +333,6 @@ function AppContent() {
         break;
       case '/auth/payment':
         PageComponent = PaymentPage;
-        break;
-      case '/profile':
-        PageComponent = PublicProfilePage;
         break;
       default:
         PageComponent = UserDashboard;

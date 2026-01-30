@@ -80,6 +80,13 @@ export function TrackOrderPage() {
         refreshOrders();
     };
 
+    const handleArchiveOrder = (orderId: string) => {
+        if (window.confirm('Deseja arquivar este pedido? Ele sairá da tela de acompanhamento.')) {
+            db.archiveOrder(orderId);
+            refreshOrders();
+        }
+    };
+
     const handleScanComplete = (data: string) => {
         setScannedReceipt(data);
         setShowScanner(false);
@@ -246,6 +253,15 @@ export function TrackOrderPage() {
                                                     {order.source === 'internal' ? 'Garçom' : 'Cliente'}
                                                 </span>
                                             </div>
+                                            {(currentRole === UserRole.COMPANY_ADMIN || currentRole === UserRole.EMPLOYEE) && (
+                                                <button
+                                                    onClick={() => handleArchiveOrder(order.id)}
+                                                    className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                    title="Arquivar Pedido"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </CardHeader>
                                     <CardContent className="space-y-4">

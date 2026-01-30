@@ -1,5 +1,6 @@
-import { Product, SubscriptionPlan } from '../types/user';
-import { mockProducts } from '../data/mockData';
+import { Product, SubscriptionPlan, Category, Company } from '../types/user';
+import { mockProducts, mockCategories } from '../data/mockData';
+import { PermissionDefinition } from '../types/PermissionDefinition';
 
 // Types
 export interface HistoryItem {
@@ -13,10 +14,11 @@ export interface HistoryItem {
 
 export interface TabData {
     id: string; // "table-1", "room-101"
-    type: 'table' | 'room';
+    type: 'table' | 'room' | 'appointment';
     number: string;
     status: 'available' | 'occupied';
     history: HistoryItem[];
+    companyId?: string;
     // You could add openTime, customerName, etc.
 }
 
@@ -24,7 +26,7 @@ export interface PublicOrder {
     id: string;
     companyId: string; // Every order belongs to a company
     userId?: string; // If made by a logged-in user
-    targetType: 'table' | 'room';
+    targetType: 'table' | 'room' | 'appointment';
     targetNumber: string;
     items: {
         productId: string;
@@ -80,14 +82,28 @@ export interface Client {
     serviceHistory: ServiceHistoryItem[];
 }
 
+export interface ScheduledService {
+    id: string;
+    serviceId: string;
+    serviceName: string;
+    employeeId: string;
+    employeeName: string;
+    startTime: string; // HH:mm
+    endTime: string;   // HH:mm
+    duration: number;  // minutes
+    price: number;
+}
+
 export interface Appointment {
     id: string;
     clientId: string;
     clientName: string;
     date: string; // YYYY-MM-DD
-    time: string; // HH:mm
-    description: string;
-    status: 'scheduled' | 'completed' | 'cancelled';
+    services: ScheduledService[];
+    totalValue: number;
+    status: 'scheduled' | 'inprogress' | 'completed' | 'cancelled';
+    isForcedFit: boolean;
+    notes?: string;
     notified: boolean;
 }
 
@@ -101,6 +117,15 @@ export interface StockMovement {
     date: string;
 }
 
+export interface EmployeeFunction {
+    id: string;
+    companyId: string;
+    name: string;
+    description?: string;
+    defaultPermissions: string[];
+}
+
+// Employee tracking in db
 export interface Employee {
     id: string;
     companyId: string;
@@ -110,8 +135,9 @@ export interface Employee {
     code: string;
     role: string;
     status: 'active' | 'inactive';
-    hiredAt: string;
     permissions: string[];
+    hiredAt: string;
+    blockedUntil?: string;
 }
 
 const STORAGE_KEYS = {
@@ -128,18 +154,321 @@ const STORAGE_KEYS = {
     COMPANIES: 'sepi_companies',
     FISCAL_DOCUMENTS: 'sepi_fiscal_docs',
     CERTIFICATES: 'sepi_certificates',
-    TAB_HISTORY: 'app_tab_history',
     SUPPLIERS: 'sepi_suppliers',
-    USERS: 'sepi_users'
+    USERS: 'sepi_users',
+    CATEGORIES: 'app_categories',
+    FUNCTIONS: 'app_functions',
+    PERMISSION_DEFINITIONS: 'app_permission_definitions'
 };
 
 class DatabaseService {
+    // --- Functions (Roles) ---
+    getFunctions(companyId?: string): EmployeeFunction[] {
+        const stored = localStorage.getItem(STORAGE_KEYS.FUNCTIONS);
+        if (!stored) {
+            const defaults: EmployeeFunction[] = [
+                { id: 'f1', companyId: 'all', name: 'Atendente', defaultPermissions: [] },
+                { id: 'f2', companyId: 'all', name: 'Cozinheiro(a)', defaultPermissions: [] },
+                { id: 'f3', companyId: 'all', name: 'Gerente', defaultPermissions: [] },
+                { id: 'f4', companyId: 'all', name: 'Caixa', defaultPermissions: [] },
+                { id: 'f5', companyId: 'all', name: 'Garçom', defaultPermissions: [] },
+            ];
+            localStorage.setItem(STORAGE_KEYS.FUNCTIONS, JSON.stringify(defaults));
+            return defaults;
+        }
+        const functions: EmployeeFunction[] = JSON.parse(stored);
+        if (companyId) {
+            return functions.filter(f => f.companyId === companyId || f.companyId === 'all');
+        }
+        return functions;
+    }
+
+    saveFunction(func: EmployeeFunction) {
+        const functions = this.getFunctions();
+        const index = functions.findIndex(f => f.id === func.id);
+        if (index >= 0) {
+            functions[index] = func;
+        } else {
+            functions.push(func);
+        }
+        localStorage.setItem(STORAGE_KEYS.FUNCTIONS, JSON.stringify(functions));
+    }
+
+    deleteFunction(id: string) {
+        const functions = this.getFunctions().filter(f => f.id !== id);
+        localStorage.setItem(STORAGE_KEYS.FUNCTIONS, JSON.stringify(functions));
+    }
+
+    // --- Permission Definitions ---
+    getDefaultPermissions(): PermissionDefinition[] {
+        return [
+            {
+                id: 'perm-schedule',
+                companyId: 'all',
+                name: 'AGENDA',
+                description: 'Acesso à agenda e marcações',
+                icon: 'Calendar',
+                route: '/employee/schedule',
+                module: 'schedule',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-pdv',
+                companyId: 'all',
+                name: 'PDV',
+                description: 'Acesso ao Ponto de Venda',
+                icon: 'ShoppingCart',
+                route: '/employee/pdv',
+                module: 'pdv',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-orders',
+                companyId: 'all',
+                name: 'PEDIDOS',
+                description: 'Acompanhamento de pedidos',
+                icon: 'ShoppingBag',
+                route: '/employee/track-order',
+                module: 'track-orders',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-products',
+                companyId: 'all',
+                name: 'PRODUTOS',
+                description: 'Gerenciamento de produtos',
+                icon: 'Package',
+                route: '/employee/orders',
+                module: 'products',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-categories',
+                companyId: 'all',
+                name: 'CATEGORIAS',
+                description: 'Gerenciamento de categorias',
+                icon: 'LayoutGrid',
+                route: '/employee/categories',
+                module: 'categories',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-inventory',
+                companyId: 'all',
+                name: 'ESTOQUE',
+                description: 'Gerenciamento de estoque',
+                icon: 'Boxes',
+                route: '/employee/inventory',
+                module: 'inventory',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-customers',
+                companyId: 'all',
+                name: 'CLIENTES',
+                description: 'Gerenciamento de clientes',
+                icon: 'Users',
+                route: '/employee/customers',
+                module: 'customers',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-suppliers',
+                companyId: 'all',
+                name: 'FORNECEDORES',
+                description: 'Gerenciamento de fornecedores',
+                icon: 'Truck',
+                route: '/employee/suppliers',
+                module: 'suppliers',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-team',
+                companyId: 'all',
+                name: 'EQUIPE',
+                description: 'Gerenciamento da equipe',
+                icon: 'Users',
+                route: '/employee/team',
+                module: 'team',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-functions',
+                companyId: 'all',
+                name: 'FUNÇÕES',
+                description: 'Gerenciamento de funções/cargos',
+                icon: 'Briefcase',
+                route: '/employee/functions',
+                module: 'functions',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-financial',
+                companyId: 'all',
+                name: 'FINANCEIRO',
+                description: 'Acesso ao financeiro',
+                icon: 'DollarSign',
+                route: '/employee/financial',
+                module: 'financial',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-reports',
+                companyId: 'all',
+                name: 'RELATÓRIOS',
+                description: 'Acesso a relatórios e análises',
+                icon: 'BarChart',
+                route: '/employee/reports',
+                module: 'reports',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-fiscal',
+                companyId: 'all',
+                name: 'FISCAL',
+                description: 'Gerenciamento fiscal e NFe',
+                icon: 'FileText',
+                route: '/employee/fiscal',
+                module: 'fiscal',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-qrcode',
+                companyId: 'all',
+                name: 'QR CODE',
+                description: 'Gerenciamento de QR Codes',
+                icon: 'QrCode',
+                route: '/employee/qrcode',
+                module: 'qrcode',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-history',
+                companyId: 'all',
+                name: 'HISTÓRICO',
+                description: 'Histórico de vendas e logs',
+                icon: 'Clock',
+                route: '/employee/history',
+                module: 'history',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-contracts',
+                companyId: 'all',
+                name: 'CONTRATOS',
+                description: 'Gerenciamento de contratos',
+                icon: 'FileSignature',
+                route: '/employee/contracts',
+                module: 'contracts',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-hardware',
+                companyId: 'all',
+                name: 'HARDWARE',
+                description: 'Configuração de periféricos',
+                icon: 'Cpu',
+                route: '/employee/hardware',
+                module: 'hardware',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-public-profile',
+                companyId: 'all',
+                name: 'PERFIL PÚBLICO',
+                description: 'Edição do perfil público da empresa',
+                icon: 'Globe',
+                route: '/employee/public-profile',
+                module: 'public-profile',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'perm-settings',
+                companyId: 'all',
+                name: 'CONFIGURAÇÕES',
+                description: 'Configurações gerais da empresa',
+                icon: 'Settings',
+                route: '/employee/settings',
+                module: 'settings',
+                isActive: true,
+                createdAt: new Date().toISOString()
+            }
+        ];
+    }
+
+    getPermissionDefinitions(companyId?: string): PermissionDefinition[] {
+        const stored = localStorage.getItem(STORAGE_KEYS.PERMISSION_DEFINITIONS);
+        if (!stored) {
+            const defaults = this.getDefaultPermissions();
+            localStorage.setItem(STORAGE_KEYS.PERMISSION_DEFINITIONS, JSON.stringify(defaults));
+            return defaults;
+        }
+        const permissions: PermissionDefinition[] = JSON.parse(stored);
+        if (companyId) {
+            return permissions.filter(p => p.companyId === companyId || p.companyId === 'all');
+        }
+        return permissions;
+    }
+
+    savePermissionDefinition(permission: PermissionDefinition) {
+        const permissions = this.getPermissionDefinitions();
+        const index = permissions.findIndex(p => p.id === permission.id);
+        if (index >= 0) {
+            permissions[index] = permission;
+        } else {
+            permissions.push(permission);
+        }
+        localStorage.setItem(STORAGE_KEYS.PERMISSION_DEFINITIONS, JSON.stringify(permissions));
+    }
+
+    deletePermissionDefinition(id: string) {
+        const permissions = this.getPermissionDefinitions().filter(p => p.id !== id);
+        localStorage.setItem(STORAGE_KEYS.PERMISSION_DEFINITIONS, JSON.stringify(permissions));
+    }
+
+    isPermissionInUse(permissionId: string): boolean {
+        const employees = this.getEmployees();
+        return employees.some(emp => emp.permissions.includes(permissionId));
+    }
+
+    // Reset permissions to default (useful for fixing duplicates)
+    resetPermissionDefinitions() {
+        const defaults = this.getDefaultPermissions();
+        localStorage.setItem(STORAGE_KEYS.PERMISSION_DEFINITIONS, JSON.stringify(defaults));
+        return defaults;
+    }
+
+
     // --- Products ---
     getProducts(): Product[] {
         const stored = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
         if (!stored) {
             // Initialize with mock data if empty
-            const initialProducts = mockProducts.map(p => ({ ...p, requiresPreparation: false }));
+            const initialProducts = mockProducts.map(p => ({
+                ...p,
+                requiresPreparation: p.requiresPreparation || false,
+                requiresReservation: p.requiresReservation || false,
+                requiresAppointment: p.requiresAppointment || false,
+                requiresDelivery: p.requiresDelivery || false
+            }));
             localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initialProducts));
             return initialProducts;
         }
@@ -167,6 +496,52 @@ class DatabaseService {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     }
 
+    updateUserStatus(userId: string, status: 'active' | 'inactive') {
+        const users = this.getUsers();
+        const index = users.findIndex(u => u.id === userId);
+        if (index !== -1) {
+            users[index].status = status;
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        }
+    }
+
+    deleteUser(userId: string) {
+        const users = this.getUsers().filter(u => u.id !== userId);
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    }
+
+    blockUser(userId: string, blockedUntil: string | null) {
+        const users = this.getUsers();
+        const index = users.findIndex(u => u.id === userId);
+        if (index !== -1) {
+            users[index].blockedUntil = blockedUntil;
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        }
+    }
+
+    updateCompanyStatus(companyId: string, status: 'active' | 'suspended') {
+        const companies = this.getCompanies();
+        const index = companies.findIndex(c => c.id === companyId);
+        if (index !== -1) {
+            companies[index].status = status;
+            localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(companies));
+
+            // Also update single company store if it exists
+            const stored = localStorage.getItem(`${STORAGE_KEYS.COMPANIES}_${companyId}`);
+            if (stored) {
+                const company = JSON.parse(stored);
+                company.status = status;
+                localStorage.setItem(`${STORAGE_KEYS.COMPANIES}_${companyId}`, JSON.stringify(company));
+            }
+        }
+    }
+
+    deleteCompany(companyId: string) {
+        const companies = this.getCompanies().filter(c => c.id !== companyId);
+        localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(companies));
+        localStorage.removeItem(`${STORAGE_KEYS.COMPANIES}_${companyId}`);
+    }
+
     // --- Tabs (Tables & Rooms) ---
     private getTabs(): Record<string, TabData> {
         const stored = localStorage.getItem(STORAGE_KEYS.TABS);
@@ -177,9 +552,9 @@ class DatabaseService {
         localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(tabs));
     }
 
-    getTab(type: 'table' | 'room', number: string): TabData {
+    getTab(type: 'table' | 'room' | 'appointment', number: string, companyId?: string): TabData {
         const tabs = this.getTabs();
-        const id = `${type}-${number}`;
+        const id = companyId ? `${companyId}-${type}-${number}` : `${type}-${number}`;
         if (!tabs[id]) {
             // Return empty/new tab if not exists
             return {
@@ -187,24 +562,27 @@ class DatabaseService {
                 type,
                 number,
                 status: 'available',
+                companyId,
                 history: []
             };
         }
         return tabs[id];
     }
 
-    addToTabHistory(type: 'table' | 'room', number: string, items: HistoryItem[]) {
+    addToTabHistory(type: 'table' | 'room' | 'appointment', number: string, items: HistoryItem[], companyId?: string) {
         const tabs = this.getTabs();
-        const id = `${type}-${number}`;
+        const id = companyId ? `${companyId}-${type}-${number}` : `${type}-${number}`;
 
         const tab = tabs[id] || {
             id,
             type,
             number,
             status: 'occupied',
+            companyId,
             history: []
         };
 
+        if (companyId) tab.companyId = companyId;
         tab.history = [...tab.history, ...items];
         tab.status = 'occupied';
 
@@ -212,9 +590,9 @@ class DatabaseService {
         this.saveTabs(tabs);
     }
 
-    clearTab(type: 'table' | 'room', number: string) {
+    clearTab(type: 'table' | 'room' | 'appointment', number: string, companyId?: string) {
         const tabs = this.getTabs();
-        const id = `${type}-${number}`;
+        const id = companyId ? `${companyId}-${type}-${number}` : `${type}-${number}`;
         if (tabs[id]) {
             tabs[id].history = [];
             tabs[id].status = 'available';
@@ -225,48 +603,7 @@ class DatabaseService {
     // --- Orders (Public & Internal Tracking) ---
     getOrders(companyId?: string, userId?: string): PublicOrder[] {
         const stored = localStorage.getItem(STORAGE_KEYS.ORDERS);
-        let orders: PublicOrder[] = [];
-
-        if (!stored) {
-            const initialOrders: PublicOrder[] = [
-                {
-                    id: 'ord-1234',
-                    companyId: 'company-001',
-                    targetType: 'table',
-                    targetNumber: '5',
-                    items: [
-                        { productId: '1', name: 'Hambúrguer Gourmet', price: 45.90, quantity: 2, status: 'pending', requiresPreparation: true },
-                        { productId: '2', name: 'Suco de Laranja Natural', price: 12.00, quantity: 1, status: 'delivered', requiresPreparation: false }
-                    ],
-                    status: 'accepted',
-                    timestamp: Date.now() - 3600000,
-                    source: 'public',
-                    history: [
-                        { status: 'Pedido criado', timestamp: Date.now() - 3610000 },
-                        { status: 'Suco de Laranja Natural: delivered', timestamp: Date.now() - 3605000, employeeName: 'Garçom Pedro' }
-                    ]
-                },
-                {
-                    id: 'ord-5678',
-                    companyId: 'company-001',
-                    targetType: 'room',
-                    targetNumber: '101',
-                    items: [
-                        { productId: '3', name: 'Café da Manhã Completo', price: 65.00, quantity: 1, status: 'pending', requiresPreparation: true }
-                    ],
-                    status: 'pending',
-                    timestamp: Date.now() - 1800000,
-                    source: 'internal',
-                    history: [
-                        { status: 'Pedido criado internamente', timestamp: Date.now() - 1810000, employeeName: 'Garçom Pedro' }
-                    ]
-                }
-            ];
-            localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(initialOrders));
-            orders = initialOrders;
-        } else {
-            orders = JSON.parse(stored);
-        }
+        let orders: PublicOrder[] = stored ? JSON.parse(stored) : [];
 
         if (companyId) {
             orders = orders.filter(o => o.companyId === companyId);
@@ -302,7 +639,7 @@ class DatabaseService {
             status: item.requiresPreparation ? 'pending' : (order.source === 'internal' ? 'delivered' : 'pending')
         }));
 
-        this.addToTabHistory(order.targetType, order.targetNumber, historyItems);
+        this.addToTabHistory(order.targetType, order.targetNumber, historyItems, order.companyId);
     }
 
     archiveOrder(orderId: string) {
@@ -315,7 +652,7 @@ class DatabaseService {
     }
 
     archiveCompletedOrders(companyId: string) {
-        const orders = this.getOrders(); // Get all orders to find and archive
+        const orders = this.getOrders();
         orders.forEach(o => {
             if (o.companyId === companyId && o.status === 'completed') {
                 o.isArchived = true;
@@ -324,41 +661,83 @@ class DatabaseService {
         this.saveOrders(orders);
     }
 
-    getAllTabs(companyId: string): { type: 'table' | 'room', number: string, status: 'available' | 'occupied' | 'ready_to_pay', total: number }[] {
-        const orders = this.getOrders(companyId).filter(o => !o.isArchived);
+    archiveOrdersByTarget(companyId: string, type: string, number: string) {
+        const orders = this.getOrders();
+        orders.forEach(o => {
+            if (o.companyId === companyId && o.targetType === type && o.targetNumber === number) {
+                o.isArchived = true;
+            }
+        });
+        this.saveOrders(orders);
+    }
+
+    clearAllMonitorData(companyId: string) {
+        // 1. Archive all active orders for this company or orphans
+        const orders = this.getOrders(); // All from localStorage
+        orders.forEach(o => {
+            if (o.companyId === companyId || !o.companyId) {
+                o.isArchived = true;
+            }
+        });
+        this.saveOrders(orders);
+
+        // 2. Clear all manual tabs for this company or orphans
+        const tabs = this.getTabs();
+        Object.keys(tabs).forEach(id => {
+            if (tabs[id].companyId === companyId || !tabs[id].companyId) {
+                tabs[id].history = [];
+                tabs[id].status = 'available';
+            }
+        });
+        // Clear legacy key just in case
+        localStorage.removeItem('app_tab_history');
+        this.saveTabs(tabs);
+    }
+
+    getAllTabs(companyId: string): { type: 'table' | 'room' | 'appointment', number: string, status: 'available' | 'occupied' | 'ready_to_pay', total: number, customerName?: string }[] {
+        // 1. Get components from both active orders and manual tab history
+        const activeOrders = this.getOrders(companyId).filter(o => !o.isArchived);
+        const tabsState = this.getTabs();
+
         const tabs: Record<string, any> = {};
 
-        // 1. Check current orders
-        orders.forEach(order => {
+        // Process active orders first
+        activeOrders.forEach(order => {
             const key = `${order.targetType}-${order.targetNumber}`;
             if (!tabs[key]) {
                 tabs[key] = {
                     type: order.targetType,
                     number: order.targetNumber,
                     status: order.status === 'completed' ? 'ready_to_pay' : 'occupied',
-                    total: 0
+                    total: 0,
+                    customerName: order.customerName
                 };
             }
             tabs[key].total += order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             if (order.status !== 'completed') tabs[key].status = 'occupied';
         });
 
-        // 2. Check tab history (occupied but maybe no active "order" if just created internally)
-        const historyStored = localStorage.getItem(STORAGE_KEYS.TAB_HISTORY); // Using new STORAGE_KEYS.TAB_HISTORY
-        const histories: Record<string, any> = historyStored ? JSON.parse(historyStored) : {};
+        // Process manual tabs history (from PDV "Add to Tab")
+        Object.entries(tabsState).forEach(([id, tab]: [string, any]) => {
+            // STRICT FILTERING: Only show tabs that explicitly belong to this company
+            if (tab.companyId !== companyId) return;
 
-        Object.entries(histories).forEach(([key, items]: [string, any]) => {
-            if (items.length > 0) {
-                const [type, number] = key.split('-');
-                if (!tabs[key]) {
-                    tabs[key] = {
-                        type,
-                        number,
-                        status: 'occupied',
-                        total: 0
+            if (tab.history && tab.history.length > 0) {
+                if (!tabs[id]) {
+                    tabs[id] = {
+                        type: tab.type,
+                        number: tab.number,
+                        status: tab.status === 'available' ? 'occupied' : tab.status, // If has history, it's at least occupied
+                        total: 0,
+                        customerName: tab.customerName
                     };
                 }
-                tabs[key].total += (items as any[]).reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                const historyTotal = tab.history.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
+                tabs[id].total += historyTotal;
+
+                // If it was already marked occupied by orders, keep it occupied. 
+                // If it was available but has history, mark as occupied.
+                if (tabs[id].status === 'available') tabs[id].status = 'occupied';
             }
         });
 
@@ -467,19 +846,7 @@ class DatabaseService {
     // --- Appointments ---
     getAppointments(): Appointment[] {
         const stored = localStorage.getItem(STORAGE_KEYS.APPOINTMENTS);
-        if (!stored) {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-            const initial: Appointment[] = [
-                { id: 'a1', clientId: 'c1', clientName: 'Carlos Mendes', date: tomorrowStr, time: '12:30', description: 'Almoço de Negócios', status: 'scheduled', notified: false },
-                { id: 'a2', clientId: 'c2', clientName: 'Ana Paula', date: tomorrowStr, time: '19:00', description: 'Jantar de Aniversário', status: 'scheduled', notified: false }
-            ];
-            localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(initial));
-            return initial;
-        }
-        return JSON.parse(stored);
+        return stored ? JSON.parse(stored) : [];
     }
 
     addAppointment(appointment: Appointment) {
@@ -497,13 +864,110 @@ class DatabaseService {
         }
     }
 
+    deleteAppointment(id: string) {
+        const appointments = this.getAppointments();
+        const filtered = appointments.filter(a => a.id !== id);
+        localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(filtered));
+    }
+
+    deleteAppointmentsByDate(date: string) {
+        const appointments = this.getAppointments();
+        const filtered = appointments.filter(a => a.date !== date);
+        localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(filtered));
+    }
+
+    sendAppointmentToPDV(appointment: Appointment) {
+        // Create an internal order for the PDV
+        const order: PublicOrder = {
+            id: `app-ord-${appointment.id}`,
+            companyId: 'company-001', // Should ideally come from auth context
+            targetType: 'appointment',
+            targetNumber: appointment.id,
+            customerName: appointment.clientName,
+            items: appointment.services.map(s => ({
+                productId: s.serviceId,
+                name: s.serviceName,
+                price: s.price,
+                quantity: 1,
+                status: 'delivered'
+            })),
+            status: 'completed', // Ready to pay
+            timestamp: Date.now(),
+            source: 'internal',
+            history: [{ status: 'Agendamento concluído e enviado ao PDV', timestamp: Date.now() }]
+        };
+
+        this.createOrder(order);
+    }
+
+    // --- Companies ---
+    getCompanies(): Company[] {
+        const stored = localStorage.getItem(STORAGE_KEYS.COMPANIES);
+        return stored ? JSON.parse(stored) : [];
+    }
+
+    getCompanyById(id: string): Company | undefined {
+        const companies = this.getCompanies();
+        const found = companies.find(c => c.id === id);
+        if (found) return found;
+
+        // Check individual storage
+        const stored = localStorage.getItem(`${STORAGE_KEYS.COMPANIES}_${id}`);
+        if (stored) return JSON.parse(stored);
+
+        // For development, return a mock company with rich social data if it's the default one
+        if (id === 'company-001') {
+            return {
+                id,
+                cnpj: '12.345.678/0001-90',
+                name: 'Restaurante Sabor & Arte Ltda',
+                tradeName: 'Restaurante Sabor & Arte',
+                email: 'contato@saborearte.com.br',
+                phone: '(11) 98888-7777',
+                address: {
+                    street: 'Rua das Flores',
+                    number: '123',
+                    neighborhood: 'Centro',
+                    city: 'São Paulo',
+                    state: 'SP',
+                    zipCode: '01234-567',
+                    country: 'Brasil'
+                },
+                ownerId: 'user-002',
+                planId: 'pro',
+                planStatus: 'active' as const,
+                settings: {
+                    businessType: 'Restaurante',
+                    logo: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=100&h=100&fit=crop',
+                    coverPhoto: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=800&q=80',
+                    bio: 'O melhor da culinária contemporânea com um toque caseiro. Ingredientes frescos e amor em cada prato. 🍽️✨',
+                    primaryColor: '#F59E0B',
+                    fiscalRegime: 'simples' as const,
+                    socialLinks: {
+                        instagram: 'https://instagram.com/saborearte',
+                        facebook: 'https://facebook.com/saborearte',
+                        whatsapp: '(11) 98888-7777'
+                    },
+                    enablePDV: true,
+                    enableFiscal: true,
+                    enableQRCode: true,
+                    enableInventory: true,
+                    enableAppointments: true,
+                    enableMenu: true,
+                    enableDetailedTracking: true
+                },
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            } as Company;
+        }
+
+        return undefined;
+    }
+
     // --- Financial ---
     getTransactions(companyId?: string): any[] {
         const stored = localStorage.getItem('erp_transactions');
-        let all: any[] = stored ? JSON.parse(stored) : [
-            { id: '1', type: 'income', category: 'Venda de Produto', description: 'Venda PDV - #1234', amount: 45.90, date: '2026-01-20', status: 'completed' },
-            { id: '2', type: 'expense', category: 'Fornecedores', description: 'Distribuidora XYZ - Carne', amount: 1200.00, date: '2026-01-19', status: 'pending' },
-        ];
+        const all: any[] = stored ? JSON.parse(stored) : [];
 
         if (companyId) {
             return all.filter(t => t.description?.includes(companyId) || t.id?.includes(companyId));
@@ -554,45 +1018,15 @@ class DatabaseService {
     }
 
     // --- Employees ---
+
     getEmployees(companyId?: string): Employee[] {
         const stored = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-        let all: Employee[] = [];
-        if (!stored) {
-            all = [
-                {
-                    id: '1',
-                    companyId: 'company-001',
-                    name: 'Pedro Oliveira',
-                    email: 'pedro@email.com',
-                    phone: '11 99999-0001',
-                    code: 'AB1234',
-                    role: 'Atendente',
-                    status: 'active',
-                    hiredAt: '2026-01-15',
-                    permissions: ['PDV', 'Estoque']
-                },
-                {
-                    id: '2',
-                    companyId: 'company-010', // Different company
-                    name: 'Ana Silva',
-                    email: 'ana.silva@email.com',
-                    phone: '11 99999-0002',
-                    code: 'CD5678',
-                    role: 'Cozinheira',
-                    status: 'active',
-                    hiredAt: '2026-01-10',
-                    permissions: ['Cozinha']
-                }
-            ];
-            localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(all));
-        } else {
-            all = JSON.parse(stored);
-        }
+        const all: Employee[] = stored ? JSON.parse(stored) : [];
+        return companyId ? all.filter(e => e.companyId === companyId) : all;
+    }
 
-        if (companyId) {
-            return all.filter(e => e.companyId === companyId);
-        }
-        return all;
+    getEmployeeByCode(code: string): Employee | undefined {
+        return this.getEmployees().find(e => e.code === code);
     }
 
     addEmployee(employee: Employee) {
@@ -608,6 +1042,11 @@ class DatabaseService {
             employees[index] = updatedEmployee;
             localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
         }
+    }
+
+    deleteEmployee(id: string) {
+        const employees = this.getEmployees().filter(e => e.id !== id);
+        localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
     }
 
     // --- Subscription Plans ---
@@ -761,30 +1200,6 @@ class DatabaseService {
         localStorage.setItem(STORAGE_KEYS.PLATFORM_SETTINGS, JSON.stringify(settings));
     }
 
-    getCompanyById(id: string): any {
-        const stored = localStorage.getItem(`${STORAGE_KEYS.COMPANIES}_${id}`);
-        if (stored) return JSON.parse(stored);
-
-        // For development, return a mock company with rich social data if it's the default one
-        return {
-            id,
-            ownerId: 'user-002', // Associate with mock user Maria Santos
-            tradeName: 'Restaurante Sabor & Arte',
-            settings: {
-                logo: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=100&h=100&fit=crop',
-                coverPhoto: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=800&q=80',
-                bio: 'O melhor da culinária contemporânea com um toque caseiro. Ingredientes frescos e amor em cada prato. 🍽️✨',
-                primaryColor: '#F59E0B',
-                socialLinks: {
-                    instagram: 'https://instagram.com/saborearte',
-                    facebook: 'https://facebook.com/saborearte',
-                    whatsapp: '(11) 98888-7777'
-                },
-                enableDetailedTracking: true
-            }
-        };
-    }
-
     saveCompanySettings(companyId: string, settings: any) {
         const company = this.getCompanyById(companyId);
         const updated = { ...company, settings: { ...company.settings, ...settings } };
@@ -883,6 +1298,40 @@ class DatabaseService {
         let all: Supplier[] = JSON.parse(stored);
         all = all.filter(s => s.id !== id);
         localStorage.setItem(STORAGE_KEYS.SUPPLIERS, JSON.stringify(all));
+    }
+
+    // --- Categories ---
+    getCategories(companyId?: string): Category[] {
+        const stored = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+        let all: Category[] = [];
+        if (!stored) {
+            all = mockCategories;
+            localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(all));
+        } else {
+            all = JSON.parse(stored);
+        }
+
+        if (companyId) {
+            return all.filter(c => c.companyId === companyId);
+        }
+        return all;
+    }
+
+    saveCategory(category: Category) {
+        const categories = this.getCategories();
+        const index = categories.findIndex(c => c.id === category.id);
+        if (index !== -1) {
+            categories[index] = category;
+        } else {
+            categories.push(category);
+        }
+        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+    }
+
+    deleteCategory(id: string) {
+        const categories = this.getCategories();
+        const filtered = categories.filter(c => c.id !== id);
+        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(filtered));
     }
 }
 

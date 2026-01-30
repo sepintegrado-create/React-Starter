@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Building2, Briefcase, Search, Filter, MoreVertical, Mail, Phone, Calendar, ChevronDown, UserCheck, UserX, UserPlus } from 'lucide-react';
+import { Users, Building2, Briefcase, Search, Filter, MoreVertical, Mail, Phone, Calendar, ChevronDown, UserCheck, UserX, UserPlus, Clock, Ban, ShieldAlert } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -24,6 +24,9 @@ export function AdminUsersBasePage() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [showAddModal, setShowAddModal] = useState(false);
     const [adminCode, setAdminCode] = useState('');
+    const [showBlockModal, setShowBlockModal] = useState(false);
+    const [selectedAccount, setSelectedAccount] = useState<any>(null);
+    const [blockDuration, setBlockDuration] = useState('1h');
 
     const [formData, setFormData] = useState({
         name: '',
@@ -133,17 +136,81 @@ export function AdminUsersBasePage() {
                 createdAt: new Date().toISOString().split('T')[0]
             }]);
         } else if (activeTab === 'users') {
-            setUsers(prev => [...prev, {
+            const newUser = {
                 id: `user-${Date.now()}`,
                 name: formData.name,
                 email: formData.email,
                 phone: formData.phone,
+                cpf: formData.cpf,
+                role: UserRole.USER,
                 status: formData.status,
-                createdAt: new Date().toISOString().split('T')[0],
+                createdAt: new Date().toISOString(),
                 ordersCount: 0
+            };
+            db.saveUser(newUser);
+            setUsers(prev => [...prev, {
+                ...newUser,
+                createdAt: newUser.createdAt.split('T')[0]
             }]);
         }
         setShowAddModal(false);
+    };
+
+    const handleBlockAccount = (account: any) => {
+        setSelectedAccount(account);
+        setShowBlockModal(true);
+    };
+
+    const handleConfirmBlock = () => {
+        if (!selectedAccount) return;
+
+        const durationMap: Record<string, number> = {
+            '1h': 60 * 60 * 1000,
+            '24h': 24 * 60 * 60 * 1000,
+            '7d': 7 * 24 * 60 * 60 * 1000,
+            '30d': 30 * 24 * 60 * 60 * 1000,
+        };
+
+        const blockedUntil = new Date(Date.now() + durationMap[blockDuration]).toISOString();
+
+        if (activeTab === 'users') {
+            db.blockUser(selectedAccount.id, blockedUntil);
+            setUsers(prev => prev.map(u => u.id === selectedAccount.id ? { ...u, blockedUntil } : u));
+        } else if (activeTab === 'companies') {
+            const companies = db.getCompanies();
+            const index = companies.findIndex(c => c.id === selectedAccount.id);
+            if (index !== -1) {
+                companies[index].blockedUntil = blockedUntil;
+                localStorage.setItem('sepi_companies', JSON.stringify(companies));
+                setCompanies(prev => prev.map(c => c.id === selectedAccount.id ? { ...c, blockedUntil } : c));
+            }
+        } else if (activeTab === 'employees') {
+            const employees = db.getEmployees();
+            const index = employees.findIndex(e => e.id === selectedAccount.id);
+            if (index !== -1) {
+                employees[index].blockedUntil = blockedUntil;
+                localStorage.setItem('app_employees', JSON.stringify(employees));
+                setEmployees(prev => prev.map(e => e.id === selectedAccount.id ? { ...e, blockedUntil } : e));
+            }
+        }
+
+        setShowBlockModal(false);
+        setSelectedAccount(null);
+    };
+
+    const handleCancelProfile = (id: string) => {
+        if (confirm('Tem certeza que deseja EXCLUIR este perfil permanentemente? Esta ação não pode ser desfeita e o usuário sairá da base.')) {
+            if (activeTab === 'users') {
+                db.deleteUser(id);
+                setUsers(prev => prev.filter(u => u.id !== id));
+            } else if (activeTab === 'companies') {
+                db.deleteCompany(id);
+                setCompanies(prev => prev.filter(c => c.id !== id));
+            } else if (activeTab === 'employees') {
+                db.deleteEmployee(id);
+                setEmployees(prev => prev.filter(e => e.id !== id));
+            }
+        }
     };
 
     const tabs = [
@@ -296,6 +363,12 @@ export function AdminUsersBasePage() {
                                             <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{user.email}</span>
                                             <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{user.phone}</span>
                                         </div>
+                                        {user.blockedUntil && new Date(user.blockedUntil) > new Date() && (
+                                            <div className="flex items-center gap-1 text-[10px] font-bold text-orange-600 uppercase bg-orange-50 px-2 py-0.5 rounded border border-orange-200 mt-2 w-fit">
+                                                <Clock className="w-3 h-3" />
+                                                Bloqueado até {new Date(user.blockedUntil).toLocaleString('pt-BR')}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
@@ -303,9 +376,29 @@ export function AdminUsersBasePage() {
                                         <p className="text-sm font-medium">{user.ordersCount} pedidos</p>
                                         <p className="text-xs text-muted-foreground">Desde {new Date(user.createdAt).toLocaleDateString('pt-BR')}</p>
                                     </div>
-                                    <button className="p-2 rounded-lg hover:bg-muted transition-colors">
-                                        <MoreVertical className="w-5 h-5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                            onClick={() => handleBlockAccount(user)}
+                                            title="Bloquear Temporariamente"
+                                        >
+                                            <Clock className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            onClick={() => handleCancelProfile(user.id)}
+                                            title="Cancelar Perfil"
+                                        >
+                                            <Ban className="w-4 h-4" />
+                                        </Button>
+                                        <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+                                            <MoreVertical className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         ))}
@@ -338,6 +431,12 @@ export function AdminUsersBasePage() {
                                             <span className="flex items-center gap-1 font-mono font-semibold"><Mail className="w-3 h-3" />{company.email}</span>
                                             <span className="font-mono font-semibold bg-primary/10 px-2 py-0.5 rounded text-primary">{company.code}</span>
                                         </div>
+                                        {company.blockedUntil && new Date(company.blockedUntil) > new Date() && (
+                                            <div className="flex items-center gap-1 text-[10px] font-bold text-orange-600 uppercase bg-orange-50 px-2 py-0.5 rounded border border-orange-200 mt-2 w-fit">
+                                                <Clock className="w-3 h-3" />
+                                                Empresa Bloqueada até {new Date(company.blockedUntil).toLocaleString('pt-BR')}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
@@ -345,9 +444,29 @@ export function AdminUsersBasePage() {
                                         <p className="text-sm font-medium">{company.employeesCount} funcionários</p>
                                         <p className="text-xs text-muted-foreground">Desde {new Date(company.createdAt).toLocaleDateString('pt-BR')}</p>
                                     </div>
-                                    <button className="p-2 rounded-lg hover:bg-muted transition-colors">
-                                        <MoreVertical className="w-5 h-5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                            onClick={() => handleBlockAccount(company)}
+                                            title="Bloquear Empresa"
+                                        >
+                                            <Clock className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            onClick={() => handleCancelProfile(company.id)}
+                                            title="Suspender Empresa"
+                                        >
+                                            <Ban className="w-4 h-4" />
+                                        </Button>
+                                        <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+                                            <MoreVertical className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         ))}
@@ -384,15 +503,41 @@ export function AdminUsersBasePage() {
                                                 </span>
                                             ))}
                                         </div>
+                                        {employee.blockedUntil && new Date(employee.blockedUntil) > new Date() && (
+                                            <div className="flex items-center gap-1 text-[10px] font-bold text-orange-600 uppercase bg-orange-50 px-2 py-0.5 rounded border border-orange-200 mt-2 w-fit">
+                                                <Clock className="w-3 h-3" />
+                                                Funcionário Bloqueado até {new Date(employee.blockedUntil).toLocaleString('pt-BR')}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <div className="text-right">
                                         <p className="text-xs text-muted-foreground">Desde {new Date(employee.hiredAt).toLocaleDateString('pt-BR')}</p>
                                     </div>
-                                    <button className="p-2 rounded-lg hover:bg-muted transition-colors">
-                                        <MoreVertical className="w-5 h-5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                            onClick={() => handleBlockAccount(employee)}
+                                            title="Bloquear Funcionário"
+                                        >
+                                            <Clock className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            onClick={() => handleCancelProfile(employee.id)}
+                                            title="Inativar Funcionário"
+                                        >
+                                            <Ban className="w-4 h-4" />
+                                        </Button>
+                                        <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+                                            <MoreVertical className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         ))}
@@ -484,6 +629,59 @@ export function AdminUsersBasePage() {
                             Cadastrar {activeTab === 'users' ? 'Usuário' : 'Administrador'}
                         </Button>
                         <Button variant="outline" className="flex-1" onClick={() => setShowAddModal(false)}>
+                            Cancelar
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Block Modal */}
+            <Modal
+                isOpen={showBlockModal}
+                onClose={() => setShowBlockModal(false)}
+                title="Bloqueio Temporário de Perfil"
+                maxWidth="max-w-md"
+            >
+                <div className="space-y-6">
+                    <div className="flex items-center gap-4 p-4 rounded-xl bg-orange-50 border border-orange-200">
+                        <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-600">
+                            <ShieldAlert className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <p className="font-bold text-orange-900">Bloquear {selectedAccount?.name || selectedAccount?.tradeName}?</p>
+                            <p className="text-sm text-orange-700">O usuário perderá acesso à plataforma durante o período selecionado.</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <p className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Selecione a Duração:</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { id: '1h', label: '1 Hora' },
+                                { id: '24h', label: '24 Horas' },
+                                { id: '7d', label: '7 Dias' },
+                                { id: '30d', label: '30 Dias' }
+                            ].map((d) => (
+                                <button
+                                    key={d.id}
+                                    onClick={() => setBlockDuration(d.id)}
+                                    className={`p-3 rounded-xl border-2 transition-all flex items-center justify-center gap-2 font-bold ${blockDuration === d.id
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-muted hover:border-muted-foreground/30 text-muted-foreground'
+                                        }`}
+                                >
+                                    <Clock className="w-4 h-4" />
+                                    {d.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex gap-3 pt-4 border-t">
+                        <Button className="flex-1" onClick={handleConfirmBlock}>
+                            Confirmar Bloqueio
+                        </Button>
+                        <Button variant="outline" className="flex-1" onClick={() => setShowBlockModal(false)}>
                             Cancelar
                         </Button>
                     </div>

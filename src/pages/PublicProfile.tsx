@@ -4,6 +4,7 @@ import { Globe, Instagram, Facebook, Linkedin, MessageSquare, Mail, Phone, Link 
 import { db, PublicOrder } from '../services/db';
 import { Button } from '../components/ui/Button';
 import { Product, UserRole } from '../types/user';
+import { mockCategories } from '../data/mockData';
 import { useAuth } from '../contexts/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
@@ -11,7 +12,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 export function PublicProfilePage() {
     const [settings, setSettings] = useState<any>(null);
     const [company, setCompany] = useState<any>(null);
-    const [activeTab, setActiveTab] = useState('Postagens');
+    const [activeTab, setActiveTab] = useState('Produtos');
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
     const [step, setStep] = useState<'profile' | 'payment' | 'receipt'>('profile');
@@ -28,8 +29,10 @@ export function PublicProfilePage() {
 
     useEffect(() => {
         const hash = window.location.hash;
-        const queryParams = new URLSearchParams(hash.split('?')[1]);
-        const companyId = queryParams.get('id');
+        const queryParams = new URLSearchParams(hash.split('?')[1] || '');
+        const companyId = queryParams.get('id') || 'company-001'; // Fallback to company-001 for demo
+
+        console.log('PublicProfile: Loading id', companyId);
 
         if (companyId) {
             const companyData = db.getCompanyById(companyId);
@@ -37,12 +40,13 @@ export function PublicProfilePage() {
             setSettings({
                 ...companyData.settings,
                 name: companyData.tradeName,
-                email: companyData.settings.socialLinks?.whatsapp || 'contato@empresa.com', // fallback
+                email: companyData.settings.socialLinks?.whatsapp || 'contato@empresa.com',
                 supportUrl: `www.sepi.pro/${companyId}`
             });
             // Load products for this company
             const allProducts = db.getProducts();
             const companyProducts = allProducts.filter(p => p.isActive && p.companyId === companyId);
+            console.log(`PublicProfile: Found ${companyProducts.length} products for ${companyId}`);
             setProducts(companyProducts);
         } else {
             setSettings(db.getPlatformSettings());
@@ -60,6 +64,7 @@ export function PublicProfilePage() {
             }
             return [...prev, { product, quantity: 1 }];
         });
+        setIsSideCartOpen(true);
     };
 
     const updateQuantity = (productId: string, delta: number) => {
@@ -123,7 +128,15 @@ export function PublicProfilePage() {
     if (!settings) return null;
 
     const tabs = ['Postagens', 'Produtos', 'Novidades', 'Galeria'];
-    const categories = ['Todos', ...Array.from(new Set(products.map(p => p.categoryId || 'Premium')))];
+
+    // Get unique category IDs and map them to names if they exist in mock data
+    const categoryIds = ['Todos', ...Array.from(new Set(products.map(p => p.categoryId || 'Premium')))];
+    const categories = categoryIds.map(id => {
+        if (id === 'Todos') return { id, name: 'Todos' };
+        const mockCat = mockCategories?.find((c: any) => c.id === id);
+        return { id, name: id === 'Premium' ? 'Premium' : (mockCat?.name || id) };
+    });
+
     const filteredProducts = selectedCategory === 'Todos' ? products : products.filter(p => p.categoryId === selectedCategory);
 
     return (
@@ -288,14 +301,14 @@ export function PublicProfilePage() {
                                                     <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2">
                                                         {categories.map(cat => (
                                                             <button
-                                                                key={cat}
-                                                                onClick={() => setSelectedCategory(cat)}
-                                                                className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${selectedCategory === cat
+                                                                key={cat.id}
+                                                                onClick={() => setSelectedCategory(cat.id)}
+                                                                className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${selectedCategory === cat.id
                                                                     ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20 scale-105'
                                                                     : 'bg-muted text-muted-foreground hover:bg-accent'
                                                                     }`}
                                                             >
-                                                                {cat}
+                                                                {cat.name}
                                                             </button>
                                                         ))}
                                                     </div>

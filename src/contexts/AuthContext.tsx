@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { User, Company, UserRole, AuthContextType } from '../types/user';
-import { mockUsers, getUserByEmail, getCompaniesByUser, getCompanyById } from '../data/mockData';
+import { mockUsers, getUserByEmail, getCompaniesByUser } from '../data/mockData';
+import { db } from '../services/db';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -27,6 +28,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         }
     }, []);
+
+    const userRef = useRef(user);
+    useEffect(() => {
+        userRef.current = user;
+    }, [user]);
+
+    // Sync user data periodically to detect permission changes
+    useEffect(() => {
+        if (!user?.id) return;
+
+        const syncInterval = setInterval(() => {
+            const currentUser = userRef.current;
+            if (!currentUser) return;
+
+            // Fetch fresh user data from localStorage via db
+            const dbUsers = db.getUsers();
+            const dbUser = dbUsers.find(u => u.id === currentUser.id);
+
+            if (!dbUser) return;
+
+            // DEDUPLICATION: Ensure no duplicate company associations or duplicate companies
+            const deduplicatedEmployeeOf = dbUser.employeeOf ?
+                dbUser.employeeOf.filter((assoc, index, self) =>
+                    index === self.findIndex(a => a.companyId === assoc.companyId)
+                ) : undefined;
+
+            const deduplicatedCompanies = dbUser.companies ?
+                [...new Set(dbUser.companies)] : undefined;
+
+            const cleanedDbUser = {
+                ...dbUser,
+                employeeOf: deduplicatedEmployeeOf,
+                companies: deduplicatedCompanies
+            };
+
+            // Compare cleaned version with current state
+            if (JSON.stringify(cleanedDbUser) !== JSON.stringify(currentUser)) {
+                console.log('🔄 User data updated - syncing permissions for:', currentUser.name);
+
+                setUser(cleanedDbUser);
+                localStorage.setItem('sepi_user', JSON.stringify(cleanedDbUser));
+
+                // If we actually cleaned something or DB was changed, ensure DB stays clean
+                if (JSON.stringify(cleanedDbUser) !== JSON.stringify(dbUser)) {
+                    db.saveUser(cleanedDbUser);
+                }
+
+                // Update role and company context if needed
+                setCurrentRole(cleanedDbUser.role);
+
+                if (cleanedDbUser.employeeOf && cleanedDbUser.employeeOf.length > 0) {
+                    const companyId = cleanedDbUser.employeeOf[0].companyId;
+                    const company = db.getCompanyById(companyId);
+                    if (company) {
+                        setCurrentCompany(company);
+                        localStorage.setItem('sepi_current_company', JSON.stringify(company));
+                    }
+                } else if (cleanedDbUser.companies && cleanedDbUser.companies.length > 0) {
+                    const companies = getCompaniesByUser(cleanedDbUser.id);
+                    if (companies.length > 0) {
+                        setCurrentCompany(companies[0]);
+                        localStorage.setItem('sepi_current_company', JSON.stringify(companies[0]));
+                    }
+                }
+            }
+        }, 5000); // Sync every 5 seconds for faster permission updates
+
+        return () => clearInterval(syncInterval);
+    }, [user?.id]); // Only restart interval if the user identity changes
 
     const login = async (email: string, password: string): Promise<void> => {
         // Simulate API call
@@ -56,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (foundUser.role === UserRole.EMPLOYEE && foundUser.employeeOf && foundUser.employeeOf.length > 0) {
             // If user is employee, set their employer company as current
             const companyId = foundUser.employeeOf[0].companyId;
-            const company = getCompanyById(companyId);
+            const company = db.getCompanyById(companyId);
             if (company) {
                 setCurrentCompany(company);
                 localStorage.setItem('sepi_current_company', JSON.stringify(company));
@@ -66,6 +136,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Store in localStorage
         localStorage.setItem('sepi_user', JSON.stringify(foundUser));
         localStorage.setItem('sepi_current_role', foundUser.role);
+
+        // Redirect to role-specific dashboard
+        if (foundUser.role === UserRole.PLATFORM_ADMIN) {
+            window.location.hash = '#/admin';
+        } else if (foundUser.role === UserRole.COMPANY_ADMIN) {
+            window.location.hash = '#/company';
+        } else if (foundUser.role === UserRole.EMPLOYEE) {
+            window.location.hash = '#/employee';
+        } else if (foundUser.role === UserRole.SELLER) {
+            window.location.hash = '#/seller';
+        } else {
+            window.location.hash = '#/user';
+        }
     };
 
     const logout = (): void => {
@@ -104,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // In production, this would save to backend
         mockUsers.push(newUser);
+        db.saveUser(newUser);
 
         // Don't auto-login, require 2FA first
         console.log('User registered:', newUser.email);
@@ -138,7 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             // Set company context for employee
             const companyId = user.employeeOf[0].companyId;
-            const company = getCompanyById(companyId);
+            const company = db.getCompanyById(companyId);
             if (company) {
                 setCurrentCompany(company);
                 localStorage.setItem('sepi_current_company', JSON.stringify(company));

@@ -7,14 +7,15 @@ import {
     Clock,
     DollarSign,
     ChevronRight,
-    Users
+    Users,
+    Calendar
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/validators';
 
 interface TableTab {
-    type: 'table' | 'room';
+    type: 'table' | 'room' | 'appointment';
     number: string;
     status: 'available' | 'occupied' | 'ready_to_pay';
     total: number;
@@ -23,7 +24,7 @@ interface TableTab {
 
 interface TableMonitorProps {
     tabs: TableTab[];
-    onSelectTab: (type: 'table' | 'room', number: string) => void;
+    onSelectTab: (type: 'table' | 'room' | 'appointment', number: string) => void;
 }
 
 export function TableMonitor({ tabs, onSelectTab }: TableMonitorProps) {
@@ -32,7 +33,7 @@ export function TableMonitor({ tabs, onSelectTab }: TableMonitorProps) {
             {tabs.map((tab) => {
                 const isOccupied = tab.status !== 'available';
                 const isReadyToPay = tab.status === 'ready_to_pay';
-                const Icon = tab.type === 'table' ? Utensils : BedDouble;
+                const Icon = tab.type === 'table' ? Utensils : (tab.type === 'room' ? BedDouble : Calendar);
 
                 return (
                     <motion.button
@@ -41,31 +42,33 @@ export function TableMonitor({ tabs, onSelectTab }: TableMonitorProps) {
                         whileTap={{ scale: 0.98 }}
                         onClick={() => onSelectTab(tab.type, tab.number)}
                         className={`relative group flex flex-col p-4 rounded-3xl border-2 transition-all text-left h-40 ${isReadyToPay
-                                ? 'border-amber-500 bg-amber-50 shadow-lg shadow-amber-200/50'
-                                : isOccupied
-                                    ? 'border-primary bg-primary/5 shadow-md'
-                                    : 'border-dashed border-muted-foreground/20 bg-muted/20 hover:border-muted-foreground/40'
+                            ? 'border-amber-500 bg-amber-50 shadow-lg shadow-amber-200/50'
+                            : isOccupied
+                                ? 'border-primary bg-primary/5 shadow-md'
+                                : 'border-dashed border-muted-foreground/20 bg-muted/20 hover:border-muted-foreground/40'
                             }`}
                     >
                         <div className="flex justify-between items-start mb-auto">
                             <div className={`p-2 rounded-xl ${isReadyToPay ? 'bg-amber-500 text-white' :
-                                    isOccupied ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
+                                isOccupied ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
                                 }`}>
                                 <Icon className="w-5 h-5" />
                             </div>
                             {isOccupied && (
                                 <div className={`px-2 py-0.5 rounded text-[10px] font-black uppercase italic ${isReadyToPay ? 'bg-amber-100 text-amber-700' : 'bg-primary/10 text-primary'
                                     }`}>
-                                    {isReadyToPay ? 'Fechar' : 'Ocupado'}
+                                    {tab.type === 'appointment' ? 'Agenda' : (isReadyToPay ? 'Fechar' : 'Ocupado')}
                                 </div>
                             )}
                         </div>
 
                         <div>
                             <p className="text-[10px] font-black uppercase text-muted-foreground tracking-widest leading-none mb-1">
-                                {tab.type === 'table' ? 'Mesa' : 'Quarto'}
+                                {tab.type === 'table' ? 'Mesa' : (tab.type === 'room' ? 'Quarto' : 'Agendamento')}
                             </p>
-                            <h3 className="text-2xl font-black italic">{tab.number}</h3>
+                            <h3 className="text-xl font-black italic line-clamp-1">
+                                {tab.type === 'appointment' ? (tab.customerName || tab.number) : tab.number}
+                            </h3>
                         </div>
 
                         {isOccupied && (

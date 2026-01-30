@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Search, Filter, Edit, Trash2, Package, Image as ImageIcon } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, Package, Image as ImageIcon, Settings } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { mockProducts, mockCategories } from '../../data/mockData';
+import { mockProducts } from '../../data/mockData';
 import { formatCurrency } from '../../utils/validators';
 import { Modal } from '../../components/ui/Modal';
 import { Product } from '../../types/user';
@@ -19,12 +19,14 @@ export function ProductsPage() {
     const [selectedCategory, setSelectedCategory] = useState('all');
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [categories, setCategories] = useState<any[]>([]);
 
     // Initial Load
     useEffect(() => {
         if (currentCompany) {
             const allProducts = db.getProducts();
             setProducts(allProducts.filter(p => p.companyId === currentCompany.id));
+            setCategories(db.getCategories(currentCompany.id));
         }
     }, [currentCompany]);
 
@@ -40,13 +42,19 @@ export function ProductsPage() {
         description: '',
         imageUrl: '',
         isActive: true,
-        requiresPreparation: false
+        requiresPreparation: false,
+        requiresReservation: false,
+        requiresAppointment: false,
+        requiresDelivery: false,
+        type: 'product' as 'product' | 'service',
+        duration: '',
+        costPrice: ''
     });
 
     const resetForm = () => {
         setFormData({
             name: '',
-            categoryId: mockCategories[0]?.id || '',
+            categoryId: categories[0]?.id || '',
             price: '',
             stock: '',
             minStock: '',
@@ -55,7 +63,13 @@ export function ProductsPage() {
             description: '',
             imageUrl: '',
             isActive: true,
-            requiresPreparation: false
+            requiresPreparation: false,
+            requiresReservation: false,
+            requiresAppointment: false,
+            requiresDelivery: false,
+            type: 'product',
+            duration: '',
+            costPrice: ''
         });
         setEditingProduct(null);
     };
@@ -78,7 +92,13 @@ export function ProductsPage() {
             description: product.description || '',
             imageUrl: product.images?.[0] || '',
             isActive: product.isActive,
-            requiresPreparation: product.requiresPreparation || false
+            requiresPreparation: product.requiresPreparation || false,
+            requiresReservation: product.requiresReservation || false,
+            requiresAppointment: product.requiresAppointment || false,
+            requiresDelivery: product.requiresDelivery || false,
+            type: product.type,
+            duration: product.duration?.toString() || '',
+            costPrice: product.costPrice?.toString() || ''
         });
         setShowAddModal(true);
     };
@@ -110,6 +130,12 @@ export function ProductsPage() {
             images: formData.imageUrl ? [formData.imageUrl] : [],
             isActive: formData.isActive,
             requiresPreparation: formData.requiresPreparation,
+            requiresReservation: formData.requiresReservation,
+            requiresAppointment: formData.requiresAppointment,
+            requiresDelivery: formData.requiresDelivery,
+            type: formData.type,
+            duration: formData.type === 'service' ? parseInt(formData.duration) : undefined,
+            costPrice: formData.costPrice ? parseFloat(formData.costPrice) : undefined,
             updatedAt: new Date().toISOString()
         };
 
@@ -124,7 +150,7 @@ export function ProductsPage() {
             const newProduct: Product = {
                 id: `prod-${Date.now()}`,
                 companyId: currentCompany?.id || 'company-001',
-                type: 'product',
+                type: formData.type,
                 images: [],
                 createdAt: new Date().toISOString(),
                 ...productData
@@ -136,6 +162,19 @@ export function ProductsPage() {
         setProducts(updatedProducts.filter(p => p.companyId === currentCompany?.id));
         setShowAddModal(false);
         resetForm();
+    };
+
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setFormData(prev => ({ ...prev, imageUrl: reader.result as string }));
+            };
+            reader.readAsDataURL(file);
+        }
     };
 
     const filteredProducts = products.filter(product => {
@@ -163,7 +202,7 @@ export function ProductsPage() {
                 {[
                     { label: 'Total de Produtos', value: products.length, color: 'text-blue-500' },
                     { label: 'Produtos Ativos', value: products.filter(p => p.isActive).length, color: 'text-green-500' },
-                    { label: 'Categorias', value: mockCategories.length, color: 'text-purple-500' },
+                    { label: 'Categorias', value: categories.length, color: 'text-purple-500' },
                     { label: 'Estoque Baixo', value: products.filter(p => p.stock && p.minStock && p.stock < p.minStock).length, color: 'text-orange-500' },
                 ].map((stat, index) => (
                     <motion.div
@@ -184,34 +223,29 @@ export function ProductsPage() {
 
             {/* Filters */}
             <Card>
-                <CardContent className="pt-6">
-                    <div className="flex flex-col md:flex-row gap-4">
-                        <div className="flex-1">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                <Input
-                                    placeholder="Buscar produtos..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="pl-10"
-                                />
-                            </div>
-                        </div>
-                        <div className="w-full md:w-64">
-                            <select
-                                value={selectedCategory}
-                                onChange={(e) => setSelectedCategory(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-input bg-background"
-                            >
-                                <option value="all">Todas as Categorias</option>
-                                {mockCategories.map(cat => (
-                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <Button variant="outline">
-                            <Filter className="w-4 h-4 mr-2" />
-                            Filtros
+                <CardContent className="p-4 flex flex-col md:flex-row gap-4">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Buscar produtos ou serviços..."
+                            className="pl-10"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <select
+                            className="px-3 py-2 rounded-lg border border-input bg-background text-sm"
+                            value={selectedCategory}
+                            onChange={(e) => setSelectedCategory(e.target.value)}
+                        >
+                            <option value="all">Todas as Categorias</option>
+                            {categories.map(cat => (
+                                <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                        </select>
+                        <Button variant="outline" size="sm">
+                            <Filter className="w-4 h-4" />
                         </Button>
                     </div>
                 </CardContent>
@@ -315,32 +349,62 @@ export function ProductsPage() {
             >
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-foreground mb-1.5">
+                                Tipo de Cadastro
+                            </label>
+                            <div className="flex bg-muted rounded-lg p-1">
+                                <button
+                                    onClick={() => setFormData({ ...formData, type: 'product' })}
+                                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${formData.type === 'product' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    Produto
+                                </button>
+                                <button
+                                    onClick={() => setFormData({ ...formData, type: 'service' })}
+                                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${formData.type === 'service' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    Serviço
+                                </button>
+                            </div>
+                        </div>
                         <Input
-                            label="Nome do Produto"
-                            placeholder="Ex: Feijoada Completa"
+                            label="Nome do Cadastro"
+                            placeholder={formData.type === 'product' ? "Ex: Feijoada Completa" : "Ex: Corte de Cabelo"}
                             required
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         />
-                        <div>
-                            <label className="block text-sm font-medium text-foreground mb-1.5">
+                    </div>
+
+                    <div>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <label className="block text-sm font-medium text-foreground">
                                 Categoria
                             </label>
-                            <select
-                                className="w-full px-3 py-2 rounded-lg border border-input bg-background"
-                                value={formData.categoryId}
-                                onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+                            <a
+                                href="#/company/categories"
+                                className="text-xs text-primary hover:underline flex items-center gap-1"
                             >
-                                {mockCategories.map(cat => (
-                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                ))}
-                            </select>
+                                <Settings className="w-3 h-3" />
+                                Gerenciar Categorias
+                            </a>
                         </div>
+                        <select
+                            className="w-full px-3 py-2 rounded-lg border border-input bg-background"
+                            value={formData.categoryId}
+                            onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+                        >
+                            <option value="">Selecione uma categoria...</option>
+                            {categories.map(cat => (
+                                <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                        </select>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Input
-                            label="Preço (R$)"
+                            label="Preço de Venda (R$)"
                             type="number"
                             step="0.01"
                             placeholder="0.00"
@@ -348,23 +412,44 @@ export function ProductsPage() {
                             value={formData.price}
                             onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                         />
-                        <Input
-                            label="Estoque Inicial"
-                            type="number"
-                            placeholder="0"
-                            value={formData.stock}
-                            onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                        />
+                        {formData.type === 'product' ? (
+                            <Input
+                                label="Estoque Inicial"
+                                type="number"
+                                placeholder="0"
+                                value={formData.stock}
+                                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                            />
+                        ) : (
+                            <Input
+                                label="Custo do Serviço (R$)"
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={formData.costPrice}
+                                onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
+                            />
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Input
-                            label="Estoque Mínimo"
-                            type="number"
-                            placeholder="0"
-                            value={formData.minStock}
-                            onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
-                        />
+                        {formData.type === 'product' ? (
+                            <Input
+                                label="Estoque Mínimo"
+                                type="number"
+                                placeholder="0"
+                                value={formData.minStock}
+                                onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                            />
+                        ) : (
+                            <Input
+                                label="Tempo de Execução (minutos)"
+                                type="number"
+                                placeholder="Ex: 30"
+                                value={formData.duration}
+                                onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
+                            />
+                        )}
                         <Input
                             label="SKU (Opcional)"
                             placeholder="EX: PRD-001"
@@ -372,6 +457,7 @@ export function ProductsPage() {
                             onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                         />
                     </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Input
                             label="Código de Barras (Opcional)"
@@ -401,6 +487,13 @@ export function ProductsPage() {
                             onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
                             icon={<ImageIcon className="w-4 h-4" />}
                         />
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                        />
                         {formData.imageUrl && (
                             <div className="relative aspect-video rounded-xl overflow-hidden border border-border">
                                 <img src={formData.imageUrl} className="w-full h-full object-cover" alt="Preview" />
@@ -413,7 +506,10 @@ export function ProductsPage() {
                             </div>
                         )}
                         {!formData.imageUrl && (
-                            <div className="p-8 rounded-2xl border-2 border-dashed border-border flex flex-col items-center justify-center text-muted-foreground hover:bg-muted/50 transition-colors cursor-pointer bg-muted/20">
+                            <div
+                                onClick={() => fileInputRef.current?.click()}
+                                className="p-8 rounded-2xl border-2 border-dashed border-border flex flex-col items-center justify-center text-muted-foreground hover:bg-muted/50 transition-colors cursor-pointer bg-muted/20"
+                            >
                                 <ImageIcon className="w-10 h-10 mb-2 opacity-50" />
                                 <p className="text-sm font-bold uppercase tracking-widest">Adicionar Foto do Produto</p>
                                 <p className="text-[10px] uppercase mt-1">Insira uma URL ou selecione um arquivo</p>
@@ -441,6 +537,41 @@ export function ProductsPage() {
                             className="rounded"
                         />
                         <label htmlFor="requiresPreparation" className="text-sm font-medium">Exige Preparo (Cozinha)</label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="flex items-center gap-2 py-2">
+                            <input
+                                type="checkbox"
+                                id="requiresReservation"
+                                checked={formData.requiresReservation}
+                                onChange={(e) => setFormData({ ...formData, requiresReservation: e.target.checked })}
+                                className="rounded"
+                            />
+                            <label htmlFor="requiresReservation" className="text-sm font-medium">Exige Reserva</label>
+                        </div>
+
+                        <div className="flex items-center gap-2 py-2">
+                            <input
+                                type="checkbox"
+                                id="requiresAppointment"
+                                checked={formData.requiresAppointment}
+                                onChange={(e) => setFormData({ ...formData, requiresAppointment: e.target.checked })}
+                                className="rounded"
+                            />
+                            <label htmlFor="requiresAppointment" className="text-sm font-medium">Exige Agenda</label>
+                        </div>
+
+                        <div className="flex items-center gap-2 py-2">
+                            <input
+                                type="checkbox"
+                                id="requiresDelivery"
+                                checked={formData.requiresDelivery}
+                                onChange={(e) => setFormData({ ...formData, requiresDelivery: e.target.checked })}
+                                className="rounded"
+                            />
+                            <label htmlFor="requiresDelivery" className="text-sm font-medium">Exige Entrega</label>
+                        </div>
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t">

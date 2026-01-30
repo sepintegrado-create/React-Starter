@@ -26,6 +26,8 @@ export interface User {
     employeeOf?: EmployeeAssociation[]; // Companies where user is an employee
     sellerCode?: string; // If user is a seller
     employeeCode?: string; // If user is an employee (for linking)
+    status?: 'active' | 'inactive';
+    blockedUntil?: string; // ISO date
 }
 
 // Employee association
@@ -49,6 +51,8 @@ export interface Company {
     ownerId: string; // User ID of company owner
     planId: string;
     planStatus: 'active' | 'suspended' | 'cancelled';
+    status?: 'active' | 'suspended' | 'cancelled';
+    blockedUntil?: string;
     settings: CompanySettings;
     createdAt: string;
     updatedAt: string;
@@ -240,9 +244,13 @@ export interface Product {
     costPrice?: number;
     stock?: number;
     minStock?: number;
+    duration?: number;
     images: string[];
     isActive: boolean;
     requiresPreparation: boolean;
+    requiresReservation?: boolean;
+    requiresAppointment?: boolean;
+    requiresDelivery?: boolean;
     fiscalData?: ProductFiscalData;
     createdAt: string;
     updatedAt: string;
@@ -284,6 +292,10 @@ export interface Transaction {
     employeeId?: string;
     qrCodeId?: string;
     fiscalDocumentId?: string;
+    location?: {
+        type: 'table' | 'room' | 'counter';
+        number?: string;
+    };
     createdAt: string;
     updatedAt: string;
 }

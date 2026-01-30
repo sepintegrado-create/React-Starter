@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { UserPlus, Search, Clock, CheckCircle, XCircle, MoreVertical, Edit2 } from 'lucide-react';
+import { UserPlus, Search, Clock, CheckCircle, XCircle, MoreVertical, Edit2, Calendar as CalendarIcon, Briefcase, Shield } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -8,6 +8,7 @@ import { generateEmployeeCode } from '../../data/mockData';
 import { Modal } from '../../components/ui/Modal';
 import { db, Employee } from '../../services/db';
 import { useAuth } from '../../contexts/AuthContext';
+import { PermissionDefinition } from '../../types/PermissionDefinition';
 
 export function EmployeesPage() {
     const { currentCompany } = useAuth();
@@ -17,6 +18,8 @@ export function EmployeesPage() {
     const [generatedCode, setGeneratedCode] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
+    const [functions, setFunctions] = useState<any[]>([]);
+    const [permissionDefinitions, setPermissionDefinitions] = useState<PermissionDefinition[]>([]);
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -34,8 +37,18 @@ export function EmployeesPage() {
     useEffect(() => {
         if (currentCompany) {
             refreshEmployees();
+            setFunctions(db.getFunctions(currentCompany.id));
+            setPermissionDefinitions(db.getPermissionDefinitions(currentCompany.id).filter(p => p.isActive));
         }
     }, [currentCompany]);
+
+    const handleRoleChange = (roleName: string) => {
+        setFormData(prev => ({
+            ...prev,
+            role: roleName
+            // Removed automatic permission assignment: a role is just a label (nomenclature)
+        }));
+    };
 
     const handleGenerateCode = () => {
         const code = generateEmployeeCode();
@@ -69,15 +82,16 @@ export function EmployeesPage() {
                 name: registeredUser.name,
                 email: registeredUser.email,
                 phone: registeredUser.phone || '',
-                status: 'active',
-                permissions: ['PDV'] // Default permission
+                status: 'active'
+                // Removed default permissions: access should be explicitly granted via checkboxes
             }));
         }
     };
 
     const handleOpenAdd = () => {
         setEditingEmployee(null);
-        setFormData({ name: '', email: '', phone: '', sellerCode: '', role: 'Atendente', status: 'active', permissions: ['PDV'] });
+        // Don't add any default permissions - only checkboxes should control permissions
+        setFormData({ name: '', email: '', phone: '', sellerCode: '', role: 'Atendente', status: 'active', permissions: [] });
         setGeneratedCode('');
         setShowAddModal(true);
     };
@@ -113,6 +127,18 @@ export function EmployeesPage() {
             return;
         }
 
+        // Map permission IDs to Permission objects for user integration
+        const mappedPermissions = formData.permissions
+            .map(permId => {
+                const permDef = permissionDefinitions.find(p => p.id === permId);
+                if (!permDef) return null;
+                return {
+                    module: permDef.module,
+                    actions: ['read', 'write'] as ('read' | 'write' | 'delete' | 'admin')[]
+                };
+            })
+            .filter(Boolean) as { module: string; actions: ('read' | 'write' | 'delete' | 'admin')[] }[];
+
         const registeredUser = db.getUsers().find(u => u.employeeCode === generatedCode);
 
         if (editingEmployee) {
@@ -121,6 +147,38 @@ export function EmployeesPage() {
                 ...formData,
                 code: generatedCode
             });
+
+            // INTEGRATION: Update user permissions if linked
+            if (registeredUser) {
+                const existingAssocIndex = (registeredUser.employeeOf || []).findIndex(
+                    emp => emp.companyId === (currentCompany?.id || 'company-001')
+                );
+
+                let updatedEmployeeOf = [...(registeredUser.employeeOf || [])];
+
+                if (existingAssocIndex !== -1) {
+                    // Update existing association
+                    updatedEmployeeOf[existingAssocIndex] = {
+                        ...updatedEmployeeOf[existingAssocIndex],
+                        employeeCode: generatedCode,
+                        permissions: mappedPermissions
+                    };
+                } else {
+                    // This shouldn't happen during "edit" if code matches, but for safety:
+                    updatedEmployeeOf.push({
+                        companyId: currentCompany?.id || 'company-001',
+                        employeeCode: generatedCode,
+                        isActive: true,
+                        hiredAt: new Date().toISOString().split('T')[0],
+                        permissions: mappedPermissions
+                    });
+                }
+
+                db.saveUser({
+                    ...registeredUser,
+                    employeeOf: updatedEmployeeOf
+                });
+            }
         } else {
             db.addEmployee({
                 id: `emp-${Date.now()}`,
@@ -133,19 +191,35 @@ export function EmployeesPage() {
 
             // INTEGRATION: Link existing user if found
             if (registeredUser) {
+                const existingAssocIndex = (registeredUser.employeeOf || []).findIndex(
+                    emp => emp.companyId === (currentCompany?.id || 'company-001')
+                );
+
+                let updatedEmployeeOf = [...(registeredUser.employeeOf || [])];
+
+                if (existingAssocIndex !== -1) {
+                    // Replace existing association to prevent duplicates
+                    updatedEmployeeOf[existingAssocIndex] = {
+                        ...updatedEmployeeOf[existingAssocIndex],
+                        employeeCode: generatedCode,
+                        isActive: true,
+                        permissions: mappedPermissions
+                    };
+                } else {
+                    // Add new association
+                    updatedEmployeeOf.push({
+                        companyId: currentCompany?.id || 'company-001',
+                        employeeCode: generatedCode,
+                        isActive: true,
+                        hiredAt: new Date().toISOString().split('T')[0],
+                        permissions: mappedPermissions
+                    });
+                }
+
                 const updatedUser = {
                     ...registeredUser,
-                    role: 'EMPLOYEE', // From UserRole enum
-                    employeeOf: [
-                        ...(registeredUser.employeeOf || []),
-                        {
-                            companyId: currentCompany?.id || 'company-001',
-                            employeeCode: generatedCode,
-                            isActive: true,
-                            hiredAt: new Date().toISOString().split('T')[0],
-                            permissions: formData.permissions
-                        }
-                    ]
+                    role: 'EMPLOYEE',
+                    employeeOf: updatedEmployeeOf
                 };
                 db.saveUser(updatedUser);
             }
@@ -168,10 +242,20 @@ export function EmployeesPage() {
                     <h1 className="text-3xl font-bold tracking-tight">Funcionários</h1>
                     <p className="text-muted-foreground mt-1">Gerencie sua equipe e permissões</p>
                 </div>
-                <Button onClick={handleOpenAdd}>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Adicionar Funcionário
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => window.location.hash = '#/company/permissions'}>
+                        <Shield className="w-4 h-4 mr-2" />
+                        Gerenciar Permissões
+                    </Button>
+                    <Button variant="outline" onClick={() => window.location.hash = '#/company/functions'}>
+                        <Briefcase className="w-4 h-4 mr-2" />
+                        Gerenciar Funções
+                    </Button>
+                    <Button onClick={handleOpenAdd}>
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Adicionar Funcionário
+                    </Button>
+                </div>
             </div>
 
             {/* Stats */}
@@ -258,11 +342,14 @@ export function EmployeesPage() {
                                             <span>{employee.role}</span>
                                         </div>
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {employee.permissions.map(perm => (
-                                                <span key={perm} className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-xs">
-                                                    {perm}
-                                                </span>
-                                            ))}
+                                            {employee.permissions.map(permId => {
+                                                const permDef = permissionDefinitions.find(p => p.id === permId);
+                                                return (
+                                                    <span key={permId} className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-xs">
+                                                        {permDef?.name || permId}
+                                                    </span>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 </div>
@@ -271,6 +358,13 @@ export function EmployeesPage() {
                                         <p className="text-sm text-muted-foreground">Desde</p>
                                         <p className="text-sm font-medium">{new Date(employee.hiredAt).toLocaleDateString('pt-BR')}</p>
                                     </div>
+                                    <button
+                                        onClick={() => window.location.hash = `#/company/schedule?employeeId=${employee.id}`}
+                                        className="p-2 rounded-lg hover:bg-muted transition-colors text-primary"
+                                        title="Ver Agenda"
+                                    >
+                                        <CalendarIcon className="w-5 h-5" />
+                                    </button>
                                     <button
                                         onClick={() => handleOpenEdit(employee)}
                                         className="p-2 rounded-lg hover:bg-muted transition-colors text-primary"
@@ -369,13 +463,12 @@ export function EmployeesPage() {
                             <select
                                 className="w-full px-3 py-2 rounded-lg border border-input bg-background"
                                 value={formData.role}
-                                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                onChange={(e) => handleRoleChange(e.target.value)}
                             >
-                                <option>Atendente</option>
-                                <option>Cozinheiro(a)</option>
-                                <option>Gerente</option>
-                                <option>Caixa</option>
-                                <option>Garçom</option>
+                                {functions.map(f => (
+                                    <option key={f.id} value={f.name}>{f.name}</option>
+                                ))}
+                                {!functions.some(f => f.name === 'Atendente') && <option>Atendente</option>}
                                 <option>Outro</option>
                             </select>
                         </div>
@@ -414,18 +507,23 @@ export function EmployeesPage() {
                             Permissões
                         </label>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                            {['PDV', 'Estoque', 'Relatórios', 'Equipe', 'Financeiro', 'Cardápio', 'Cozinha'].map(perm => (
-                                <label key={perm} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${formData.permissions.includes(perm) ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}>
+                            {permissionDefinitions.map(perm => (
+                                <label key={perm.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${formData.permissions.includes(perm.id) ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}>
                                     <input
                                         type="checkbox"
                                         className="rounded text-primary focus:ring-primary"
-                                        checked={formData.permissions.includes(perm)}
-                                        onChange={() => handleTogglePermission(perm)}
+                                        checked={formData.permissions.includes(perm.id)}
+                                        onChange={() => handleTogglePermission(perm.id)}
                                     />
-                                    <span className="text-sm font-medium">{perm}</span>
+                                    <span className="text-sm font-medium">{perm.name}</span>
                                 </label>
                             ))}
                         </div>
+                        {permissionDefinitions.length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-4">
+                                Nenhuma permissão disponível. <button onClick={() => window.location.hash = '#/company/permissions'} className="text-primary hover:underline">Criar permissões</button>
+                            </p>
+                        )}
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t">

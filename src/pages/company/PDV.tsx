@@ -19,14 +19,15 @@ import {
     Maximize,
     Minimize,
     Keyboard as KeyboardIcon,
-    LayoutDashboard
+    LayoutDashboard,
+    Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { formatCurrency } from '../../utils/validators';
-import { Product } from '../../types/user';
+import { Product, UserRole } from '../../types/user';
 import { db, HistoryItem } from '../../services/db';
 import { useAuth } from '../../contexts/AuthContext';
 import { TableMonitor } from '../../components/company/TableMonitor';
@@ -43,7 +44,7 @@ export function PDVPage() {
     const [showCheckout, setShowCheckout] = useState(false);
 
     // New Context State
-    const [salesType, setSalesType] = useState<'counter' | 'table' | 'room'>('counter');
+    const [salesType, setSalesType] = useState<'counter' | 'table' | 'room' | 'appointment'>('counter');
     const [targetNumber, setTargetNumber] = useState('');
     const [showHistory, setShowHistory] = useState(false);
 
@@ -65,7 +66,7 @@ export function PDVPage() {
     // 2. Load History when Table/Room changes
     useEffect(() => {
         if (salesType !== 'counter' && targetNumber) {
-            const tab = db.getTab(salesType as 'table' | 'room', targetNumber);
+            const tab = db.getTab(salesType as 'table' | 'room' | 'appointment', targetNumber, currentCompany?.id);
             setHistoryItems(tab.history);
         } else {
             setHistoryItems([]);
@@ -79,7 +80,7 @@ export function PDVPage() {
                 setAllTabs(db.getAllTabs(currentCompany.id));
             }
             if (salesType !== 'counter' && targetNumber) {
-                const tab = db.getTab(salesType as 'table' | 'room', targetNumber);
+                const tab = db.getTab(salesType as 'table' | 'room' | 'appointment', targetNumber, currentCompany?.id);
                 setHistoryItems(tab.history);
             }
         };
@@ -189,7 +190,7 @@ export function PDVPage() {
             id: `int-${Date.now()}`,
             companyId: currentCompany?.id || 'company-001',
             waiterId: user?.id,
-            targetType: salesType as 'table' | 'room',
+            targetType: salesType as 'table' | 'room' | 'appointment',
             targetNumber: targetNumber,
             customerName: targetNumber ? `${salesType === 'table' ? 'Mesa' : 'Quarto'} ${targetNumber}` : 'Balcão',
             items: cart.map(item => ({
@@ -206,7 +207,8 @@ export function PDVPage() {
             history: [{ status: 'Pedido criado internamente', timestamp: Date.now(), employeeName: user?.name }]
         });
 
-        setHistoryItems(db.getTab(salesType as 'table' | 'room', targetNumber).history);
+        setHistoryItems(db.getTab(salesType as 'table' | 'room' | 'appointment', targetNumber, currentCompany?.id).history);
+        if (currentCompany) setAllTabs(db.getAllTabs(currentCompany.id));
         setCart([]);
         alert(`Pedido enviado para ${salesType === 'table' ? 'Mesa' : 'Quarto'} ${targetNumber}!`);
     };
@@ -214,7 +216,7 @@ export function PDVPage() {
     const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
     const historyTotal = historyItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    const grandTotal = (salesType === 'table' || salesType === 'room') ? total + historyTotal : total;
+    const grandTotal = (salesType !== 'counter') ? total + historyTotal : total;
 
     const filteredProducts = products.filter(p =>
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -241,19 +243,24 @@ export function PDVPage() {
             id: `trans-${Date.now()}`,
             type: 'income',
             category: 'Venda de Produto',
-            description: `Venda PDV - ${salesType === 'counter' ? 'Balcão' : (salesType === 'table' ? 'Mesa ' + targetNumber : 'Quarto ' + targetNumber)}`,
+            description: `Venda PDV - ${salesType === 'counter' ? 'Balcão' : (salesType === 'table' ? 'Mesa ' + targetNumber : (salesType === 'room' ? 'Quarto ' + targetNumber : 'Agendamento ' + targetNumber))}`,
             amount: grandTotal,
             date: new Date().toISOString().split('T')[0],
             status: 'completed',
             finishedBy: user?.id
         });
 
+        // Archive any pending orders for this table/room BEFORE creating final order
+        if (salesType !== 'counter' && targetNumber) {
+            db.archiveOrdersByTarget(currentCompany?.id || 'company-001', salesType, targetNumber);
+        }
+
         // INTEGRATION: Create an order record so it shows up in Reports
         db.createOrder({
             id: orderId,
             companyId: currentCompany?.id || 'company-001',
             userId: undefined, // Direct sale
-            targetType: salesType === 'counter' ? 'table' : salesType as 'table' | 'room',
+            targetType: salesType === 'counter' ? 'table' : salesType as 'table' | 'room' | 'appointment',
             targetNumber: targetNumber || 'B',
             items: [
                 ...cart.map(item => ({
@@ -274,20 +281,22 @@ export function PDVPage() {
             status: 'completed',
             timestamp: Date.now(),
             source: 'internal',
-            history: [{ status: 'Venda finalizada no PDV', timestamp: Date.now(), employeeName: user?.name }]
+            history: [{ status: 'Venda finalizada no PDV', timestamp: Date.now(), employeeName: user?.name }],
+            isArchived: true // Mark as archived so it doesn't show in active monitor
         });
 
         alert('Venda finalizada com sucesso!');
         if (salesType !== 'counter' && targetNumber) {
-            db.clearTab(salesType as 'table' | 'room', targetNumber);
+            db.clearTab(salesType as 'table' | 'room' | 'appointment', targetNumber, currentCompany?.id);
         }
+        if (currentCompany) setAllTabs(db.getAllTabs(currentCompany.id));
         setCart([]);
         setHistoryItems([]);
         setShowCheckout(false);
         setPaymentMethod(null);
     };
 
-    const handleSelectTabFromMonitor = (type: 'table' | 'room', number: string) => {
+    const handleSelectTabFromMonitor = (type: 'table' | 'room' | 'appointment', number: string) => {
         setSalesType(type);
         setTargetNumber(number);
         setViewMode('menu');
@@ -331,7 +340,7 @@ export function PDVPage() {
                             <h2 className="text-xl font-black uppercase italic tracking-tight">Monitor de Atendimento</h2>
                             <p className="text-xs text-muted-foreground font-medium uppercase mt-1">Visão geral de todas as mesas e quartos</p>
                         </div>
-                        <div className="flex gap-4">
+                        <div className="flex gap-4 items-center">
                             <div className="flex items-center gap-2">
                                 <div className="w-3 h-3 rounded-full bg-primary" />
                                 <span className="text-[10px] font-bold uppercase tracking-widest">Ocupado</span>
@@ -344,6 +353,22 @@ export function PDVPage() {
                                 <div className="w-3 h-3 rounded-full bg-muted-foreground/20" />
                                 <span className="text-[10px] font-bold uppercase tracking-widest">Livre</span>
                             </div>
+                            {user?.role === UserRole.COMPANY_ADMIN && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        if (currentCompany && window.confirm('Deseja limpar TODO o monitor? Isso arquivará todos os atendimentos ativos.')) {
+                                            db.clearAllMonitorData(currentCompany.id);
+                                            setAllTabs(db.getAllTabs(currentCompany.id));
+                                        }
+                                    }}
+                                    className="ml-4 gap-2 text-[10px] font-black uppercase italic text-red-600 border-red-200 hover:bg-red-50 py-1 h-7"
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                    Limpar Monitor
+                                </Button>
+                            )}
                         </div>
                     </div>
                     <TableMonitor
@@ -357,7 +382,7 @@ export function PDVPage() {
                         <div className="flex flex-col gap-4">
                             <div className="flex items-center gap-4 bg-card p-2 rounded-xl border border-border">
                                 <div className="flex bg-muted rounded-lg p-1">
-                                    {['counter', 'table', 'room'].map((type) => (
+                                    {['counter', 'table', 'room', 'appointment'].map((type) => (
                                         <button
                                             key={type}
                                             onClick={() => setSalesType(type as any)}
@@ -365,7 +390,8 @@ export function PDVPage() {
                                         >
                                             {type === 'table' && <Utensils className="w-4 h-4" />}
                                             {type === 'room' && <BedDouble className="w-4 h-4" />}
-                                            {type === 'counter' ? 'Balcão' : type === 'table' ? 'Mesa' : 'Quarto'}
+                                            {type === 'appointment' && <Calendar className="w-4 h-4" />}
+                                            {type === 'counter' ? 'Balcão' : type === 'table' ? 'Mesa' : type === 'room' ? 'Quarto' : 'Agenda'}
                                         </button>
                                     ))}
                                 </div>
@@ -490,33 +516,78 @@ export function PDVPage() {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                            {cart.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
-                                    <ShoppingCart className="w-12 h-12 mb-4" />
-                                    <p>Carrinho vazio</p>
-                                </div>
-                            ) : cart.map((item) => (
-                                <motion.div layout key={item.id} className="flex flex-col gap-2 p-3 rounded-xl border border-border bg-background">
-                                    <div className="flex justify-between items-start">
-                                        <span className="font-medium text-sm leading-tight flex-1">{item.name}</span>
-                                        <button onClick={() => removeFromCart(item.id)} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
+                            {/* Consumed Items Section */}
+                            {historyItems.length > 0 && (
+                                <div className="space-y-3 pb-4 border-b border-dashed border-border/50">
+                                    <div className="flex items-center gap-2 text-[10px] font-black uppercase text-muted-foreground italic mb-1">
+                                        <History className="w-3 h-3" />
+                                        Consumo da {salesType === 'table' ? 'Mesa' : 'Quarto'} {targetNumber}
                                     </div>
-                                    <div className="flex items-center justify-between mt-1">
-                                        <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
-                                            <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-background rounded-md"><Minus className="w-3 h-3" /></button>
-                                            <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
-                                            <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-background rounded-md"><Plus className="w-3 h-3" /></button>
+                                    {historyItems.map((item, idx) => (
+                                        <div key={`hist-${idx}`} className="flex flex-col gap-1 p-2.5 rounded-xl border border-border/50 bg-muted/10 opacity-75">
+                                            <div className="flex justify-between items-start">
+                                                <span className="font-medium text-xs leading-tight flex-1">{item.productName}</span>
+                                                <span className="text-[9px] font-black uppercase bg-green-100/50 text-green-700 px-1.5 py-0.5 rounded italic">Já Servido</span>
+                                            </div>
+                                            <div className="flex items-center justify-between mt-0.5">
+                                                <span className="text-[10px] text-muted-foreground">{item.quantity}x {formatCurrency(item.price)}</span>
+                                                <span className="font-bold text-xs text-muted-foreground">{formatCurrency(item.price * item.quantity)}</span>
+                                            </div>
                                         </div>
-                                        <span className="font-bold text-primary">{formatCurrency(item.price * item.quantity)}</span>
-                                    </div>
-                                </motion.div>
-                            ))}
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Pending Cart Items Section */}
+                            {cart.length === 0 && historyItems.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 py-12">
+                                    <ShoppingCart className="w-12 h-12 mb-4" />
+                                    <p className="font-bold uppercase tracking-widest text-xs">Carrinho vazio</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {cart.length > 0 && historyItems.length > 0 && (
+                                        <div className="flex items-center gap-2 text-[10px] font-black uppercase text-primary italic mb-1">
+                                            <Plus className="w-3 h-3" />
+                                            Novos Itens a Adicionar
+                                        </div>
+                                    )}
+                                    {cart.map((item) => (
+                                        <motion.div layout key={item.id} className="flex flex-col gap-2 p-3 rounded-xl border border-primary/20 bg-background shadow-sm">
+                                            <div className="flex justify-between items-start">
+                                                <span className="font-medium text-sm leading-tight flex-1">{item.name}</span>
+                                                <button onClick={() => removeFromCart(item.id)} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
+                                            </div>
+                                            <div className="flex items-center justify-between mt-1">
+                                                <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
+                                                    <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-background rounded-md"><Minus className="w-3 h-3" /></button>
+                                                    <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
+                                                    <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-background rounded-md"><Plus className="w-3 h-3" /></button>
+                                                </div>
+                                                <span className="font-bold text-primary">{formatCurrency(item.price * item.quantity)}</span>
+                                            </div>
+                                        </motion.div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div className="p-6 bg-muted/30 border-t space-y-4">
                             <div className="space-y-2">
-                                <div className="flex justify-between text-sm text-muted-foreground"><span>Itens ({itemCount})</span><span>{formatCurrency(total)}</span></div>
-                                <div className="flex justify-between text-lg font-black text-foreground"><span>TOTAL</span><span>{formatCurrency(total)}</span></div>
+                                <div className="flex justify-between text-sm text-muted-foreground">
+                                    <span>Novos Itens ({itemCount})</span>
+                                    <span>{formatCurrency(total)}</span>
+                                </div>
+                                {historyItems.length > 0 && (
+                                    <div className="flex justify-between text-sm text-muted-foreground">
+                                        <span>Consumo Anterior</span>
+                                        <span>{formatCurrency(historyTotal)}</span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between text-xl font-black text-primary pt-2 border-t border-dashed border-border/50">
+                                    <span>VALOR TOTAL</span>
+                                    <span>{formatCurrency(grandTotal)}</span>
+                                </div>
                             </div>
                             <div className="grid gap-2">
                                 {salesType !== 'counter' && targetNumber ? (

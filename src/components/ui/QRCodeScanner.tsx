@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, X, CheckCircle, AlertCircle } from 'lucide-react';
+import jsQR from 'jsqr';
 
 interface QRCodeScannerProps {
     onScan: (data: string) => void;
@@ -88,9 +89,7 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
 
         // Try to decode QR code using jsQR library
-        // Note: You'll need to install jsQR: npm install jsqr
         try {
-            // @ts-ignore - jsQR will be imported separately
             const code = jsQR(imageData.data, imageData.width, imageData.height, {
                 inversionAttempts: 'dontInvert',
             });

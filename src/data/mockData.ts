@@ -26,7 +26,24 @@ export const mockUsers: User[] = [
         email: 'joao@email.com',
         phone: '11988888888',
         password: 'User@123',
-        role: UserRole.USER,
+        role: UserRole.USER, // Everyone starts as USER
+        employeeCode: 'JOAO01',
+        employeeOf: [
+            {
+                companyId: 'company-001',
+                employeeCode: 'JOAO01',
+                permissions: [
+                    { module: 'pdv', actions: ['read', 'write'] },
+                    { module: 'inventory', actions: ['read'] },
+                    { module: 'qrcode', actions: ['read', 'write'] },
+                    { module: 'track-orders', actions: ['read', 'write'] },
+                    { module: 'history', actions: ['read'] },
+                    { module: 'communication', actions: ['read', 'write'] }
+                ],
+                isActive: true,
+                hiredAt: '2026-01-20T10:00:00Z'
+            }
+        ],
         twoFactorEnabled: true,
         twoFactorVerified: true,
         acceptedTerms: true,
@@ -55,17 +72,17 @@ export const mockUsers: User[] = [
         email: 'pedro@email.com',
         phone: '11966666666',
         password: 'User@123',
-        role: UserRole.EMPLOYEE,
+        role: UserRole.USER,
+        employeeCode: 'PEDRO01',
         twoFactorEnabled: true,
         twoFactorVerified: true,
         acceptedTerms: true,
         employeeOf: [
             {
                 companyId: 'company-001',
-                employeeCode: 'AB1234',
+                employeeCode: 'PEDRO01',
                 permissions: [
-                    { module: 'pdv', actions: ['read', 'write'] },
-                    { module: 'inventory', actions: ['read'] }
+                    { module: 'pdv', actions: ['read', 'write'] }
                 ],
                 isActive: true,
                 hiredAt: '2026-01-15T09:00:00Z'
@@ -349,6 +366,9 @@ export const mockProducts: Product[] = [
         images: [],
         isActive: true,
         requiresPreparation: true,
+        requiresReservation: false,
+        requiresAppointment: false,
+        requiresDelivery: false,
         createdAt: '2026-01-05T09:00:00Z',
         updatedAt: '2026-01-05T09:00:00Z'
     },
@@ -368,6 +388,9 @@ export const mockProducts: Product[] = [
         images: [],
         isActive: true,
         requiresPreparation: false,
+        requiresReservation: false,
+        requiresAppointment: false,
+        requiresDelivery: false,
         createdAt: '2026-01-05T09:00:00Z',
         updatedAt: '2026-01-05T09:00:00Z'
     },
@@ -382,6 +405,9 @@ export const mockProducts: Product[] = [
         images: [],
         isActive: true,
         requiresPreparation: false,
+        requiresReservation: false,
+        requiresAppointment: false,
+        requiresDelivery: false,
         createdAt: '2026-01-08T14:30:00Z',
         updatedAt: '2026-01-08T14:30:00Z'
     }

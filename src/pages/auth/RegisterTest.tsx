@@ -10,7 +10,8 @@ import {
     ArrowRight,
     ArrowLeft,
     ShieldCheck,
-    FileText
+    FileText,
+    Beaker
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -20,8 +21,8 @@ import { validateCPF, formatCPF, validateEmail, formatPhone } from '../../utils/
 import { db } from '../../services/db';
 import { Modal } from '../../components/ui/Modal';
 
-export function Register() {
-    const { register, verify2FA } = useAuth();
+export function RegisterTest() {
+    const { register } = useAuth();
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [showTerms, setShowTerms] = useState(false);
@@ -29,17 +30,17 @@ export function Register() {
 
     // Form State
     const [formData, setFormData] = useState({
-        name: '',
-        email: '',
-        phone: '',
-        cpf: '',
-        password: '',
-        confirmPassword: '',
-        acceptedTerms: false
+        name: 'Usuário de Teste',
+        email: 'teste@sepi.pro',
+        phone: '(11) 98491-0000',
+        cpf: '000.000.000-00',
+        password: 'password123',
+        confirmPassword: 'password123',
+        acceptedTerms: true
     });
 
     const [errors, setErrors] = useState<Record<string, string>>({});
-    const [verificationCode, setVerificationCode] = useState('');
+    const [verificationCode, setVerificationCode] = useState('8491');
     const [isVerified, setIsVerified] = useState(false);
 
     useEffect(() => {
@@ -48,76 +49,21 @@ export function Register() {
     }, []);
 
     const handleNext = () => {
-        const newErrors: Record<string, string> = {};
-
-        if (step === 1) {
-            if (!formData.name) newErrors.name = 'Nome é obrigatório';
-            if (!formData.cpf) newErrors.cpf = 'CPF é obrigatório';
-            else if (!validateCPF(formData.cpf)) newErrors.cpf = 'CPF inválido';
-
-            if (!formData.email) newErrors.email = 'Email é obrigatório';
-            else if (!validateEmail(formData.email)) newErrors.email = 'Email inválido';
-
-            if (!formData.phone) newErrors.phone = 'Celular é obrigatório';
-
-            if (!formData.password) newErrors.password = 'Senha é obrigatória';
-            else if (formData.password.length < 6) newErrors.password = 'Senha deve ter pelo menos 6 caracteres';
-
-            if (formData.password !== formData.confirmPassword) {
-                newErrors.confirmPassword = 'As senhas não coincidem';
-            }
-
-            if (!formData.acceptedTerms) {
-                newErrors.terms = 'Você precisa aceitar os termos de uso';
-            }
-        }
-
-        if (Object.keys(newErrors).length > 0) {
-            setErrors(newErrors);
-            return;
-        }
-
-        setErrors({});
         setStep(step + 1);
-
-        // Simulate sending code
-        if (step === 1) {
-            console.log('Sending verification code to:', formData.email);
-        } else if (step === 2) {
-            console.log('Sending verification code to:', formData.phone);
-        }
     };
 
     const handleVerify = async () => {
-        if (verificationCode.length !== 4 && verificationCode.length !== 6) {
-            setErrors({ code: 'O código deve ter 4 ou 6 dígitos' });
-            return;
-        }
-
         setIsLoading(true);
-
-        // Test validation code logic
-        if (verificationCode === '8491') {
-            if (step === 2) {
-                setStep(3);
-                setVerificationCode('');
-            } else if (step === 3) {
-                handleFinalRegister();
-            }
-            setIsLoading(false);
-            return;
-        }
-
-        // Simulate normal verification
+        // Instant verification with test code
         setTimeout(() => {
             if (step === 2) {
                 setStep(3);
-                setVerificationCode('');
+                setVerificationCode('8491');
             } else if (step === 3) {
                 handleFinalRegister();
             }
             setIsLoading(false);
-        }, 1500);
+        }, 500);
     };
 
     const handleFinalRegister = async () => {
@@ -139,21 +85,28 @@ export function Register() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-primary/10 via-background to-secondary/10">
+        <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-yellow-50 via-background to-blue-50">
+            <div className="fixed top-4 left-4 z-50">
+                <div className="bg-yellow-100 border-2 border-yellow-400 text-yellow-800 px-4 py-2 rounded-full font-black flex items-center gap-2 shadow-xl animate-bounce">
+                    <Beaker className="w-5 h-5" />
+                    MODO DE TESTE ATIVO
+                </div>
+            </div>
+
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full max-w-lg"
             >
-                <Card className="overflow-hidden">
-                    <CardHeader className="text-center bg-muted/30 pb-8">
+                <Card className="overflow-hidden border-yellow-200 border-2 shadow-2xl">
+                    <CardHeader className="text-center bg-yellow-50/50 pb-8">
                         <div className="flex justify-center mb-4 pt-4">
                             <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center transform rotate-12 shadow-lg">
                                 <UserPlus className="w-8 h-8 text-primary-foreground transform -rotate-12" />
                             </div>
                         </div>
-                        <CardTitle className="text-2xl font-black">Crie sua conta</CardTitle>
-                        <CardDescription>Junte-se a centenas de empresas no SEPI</CardDescription>
+                        <CardTitle className="text-2xl font-black">Cadastro de Teste</CardTitle>
+                        <CardDescription>Validação rápida com o código <span className="font-black text-primary">8491</span></CardDescription>
 
                         {/* Progress Stepper */}
                         <div className="flex items-center justify-center mt-6 gap-2">
@@ -180,18 +133,14 @@ export function Register() {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <Input
                                             label="Nome Completo"
-                                            placeholder="Ex: João Silva"
                                             value={formData.name}
                                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                            error={errors.name}
                                             required
                                         />
                                         <Input
                                             label="CPF"
-                                            placeholder="000.000.000-00"
                                             value={formData.cpf}
                                             onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
-                                            error={errors.cpf}
                                             required
                                         />
                                     </div>
@@ -199,40 +148,14 @@ export function Register() {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <Input
                                             label="E-mail"
-                                            type="email"
-                                            placeholder="seu@email.com"
                                             value={formData.email}
                                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                            error={errors.email}
                                             required
                                         />
                                         <Input
                                             label="Celular"
-                                            placeholder="(00) 00000-0000"
                                             value={formData.phone}
                                             onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
-                                            error={errors.phone}
-                                            required
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <Input
-                                            label="Senha"
-                                            type="password"
-                                            placeholder="••••••"
-                                            value={formData.password}
-                                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                            error={errors.password}
-                                            required
-                                        />
-                                        <Input
-                                            label="Confirmar Senha"
-                                            type="password"
-                                            placeholder="••••••"
-                                            value={formData.confirmPassword}
-                                            onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                                            error={errors.confirmPassword}
                                             required
                                         />
                                     </div>
@@ -257,10 +180,9 @@ export function Register() {
                                             </button> de acordo com a LGPD.
                                         </label>
                                     </div>
-                                    {errors.terms && <p className="text-xs text-destructive mt-1">{errors.terms}</p>}
 
                                     <Button onClick={handleNext} className="w-full h-12 text-lg font-bold group">
-                                        Próximo Passo
+                                        Próximo Passo (Bypass)
                                         <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
                                     </Button>
                                 </motion.div>
@@ -279,45 +201,31 @@ export function Register() {
                                     </div>
 
                                     <div>
-                                        <h3 className="text-xl font-bold">Verifique seu {step === 2 ? 'e-mail' : 'celular'}</h3>
+                                        <h3 className="text-xl font-bold">Verificação de Teste</h3>
                                         <p className="text-muted-foreground mt-2">
-                                            Enviamos um código de 6 dígitos para:<br />
-                                            <span className="font-bold text-foreground">
-                                                {step === 2 ? formData.email : formData.phone}
+                                            Use o código mágico para os testes:<br />
+                                            <span className="font-black text-3xl text-primary tracking-widest mt-2 block">
+                                                8491
                                             </span>
                                         </p>
                                     </div>
 
                                     <div className="flex justify-center gap-2">
                                         <Input
-                                            className="text-center text-2xl font-black tracking-[1em] max-w-[200px]"
-                                            maxLength={6}
-                                            placeholder="000000"
+                                            className="text-center text-2xl font-black tracking-[0.5em] max-w-[200px]"
+                                            maxLength={4}
                                             value={verificationCode}
-                                            onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                                            error={errors.code}
+                                            onChange={(e) => setVerificationCode(e.target.value)}
                                         />
                                     </div>
 
-                                    <div className="space-y-3">
-                                        <Button
-                                            onClick={handleVerify}
-                                            className="w-full h-12 font-bold"
-                                            isLoading={isLoading}
-                                        >
-                                            Verificar e Continuar
-                                        </Button>
-                                        <button
-                                            onClick={() => setStep(step - 1)}
-                                            className="text-sm text-muted-foreground hover:text-primary flex items-center justify-center mx-auto"
-                                        >
-                                            <ArrowLeft className="w-4 h-4 mr-1" /> Voltar
-                                        </button>
-                                    </div>
-
-                                    <p className="text-xs text-muted-foreground">
-                                        Não recebeu? <button className="text-primary font-bold hover:underline">Reenviar código</button>
-                                    </p>
+                                    <Button
+                                        onClick={handleVerify}
+                                        className="w-full h-12 font-bold"
+                                        isLoading={isLoading}
+                                    >
+                                        Validar com Código de Teste
+                                    </Button>
                                 </motion.div>
                             )}
 
@@ -328,26 +236,15 @@ export function Register() {
                                     animate={{ scale: 1, opacity: 1 }}
                                     className="text-center py-8 space-y-6"
                                 >
-                                    <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                                    <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center text-green-600 shadow-lg">
                                         <CheckCircle2 className="w-12 h-12" />
                                     </div>
 
                                     <div>
-                                        <h3 className="text-2xl font-black">Cadastro Concluído!</h3>
+                                        <h3 className="text-2xl font-black text-green-700">Teste Concluído!</h3>
                                         <p className="text-muted-foreground mt-2">
-                                            Sua conta foi criada com sucesso e seu CPF foi validado em nossa base.
+                                            O cadastro foi realizado com sucesso usando o bypass de desenvolvedor.
                                         </p>
-                                    </div>
-
-                                    <div className="p-4 rounded-xl bg-muted/50 text-left space-y-2">
-                                        <div className="flex items-center gap-3 text-sm">
-                                            <ShieldCheck className="w-5 h-5 text-primary" />
-                                            <span>2FA Habilitado e Verificado</span>
-                                        </div>
-                                        <div className="flex items-center gap-3 text-sm">
-                                            <Fingerprint className="w-5 h-5 text-primary" />
-                                            <span>CPF {formData.cpf} Validado</span>
-                                        </div>
                                     </div>
 
                                     <Button className="w-full h-12 text-lg font-bold" onClick={() => window.location.hash = '/'}>
@@ -357,16 +254,10 @@ export function Register() {
                             )}
                         </AnimatePresence>
                     </CardContent>
-
-                    <CardFooter className="justify-center border-t py-4">
-                        <p className="text-sm text-muted-foreground">
-                            Já tem uma conta? <a href="#/" className="text-primary font-bold hover:underline">ENTRAR</a>
-                        </p>
-                    </CardFooter>
                 </Card>
             </motion.div>
 
-            {/* Terms Modal */}
+            {/* Terms Modal (Dynamic) */}
             <Modal
                 isOpen={showTerms}
                 onClose={() => setShowTerms(false)}
@@ -387,14 +278,6 @@ export function Register() {
                                 .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
                                 .replace(/\n/g, '<br/>')
                         }} />
-                    </div>
-                    <div className="flex justify-end pt-4 border-t">
-                        <Button onClick={() => {
-                            setFormData({ ...formData, acceptedTerms: true });
-                            setShowTerms(false);
-                        }}>
-                            Eu li e concordo
-                        </Button>
                     </div>
                 </div>
             </Modal>

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion } from 'framer-motion';
-import { QrCode, Download, Share2, Copy, Check, X } from 'lucide-react';
+import { QrCode, Download, Share2, Copy, Check, X, Camera } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
+import { QRCodeScanner } from '../../components/ui/QRCodeScanner';
 
 import { db } from '../../services/db';
 
@@ -34,6 +35,7 @@ export function QRCodePage() {
     // Validation State
     const [validationCode, setValidationCode] = useState('');
     const [validationResult, setValidationResult] = useState<any>(null);
+    const [showScanner, setShowScanner] = useState(false);
 
     const handleCopy = () => {
         setCopied(true);
@@ -197,6 +199,13 @@ export function QRCodePage() {
                             onChange={(e) => setValidationCode(e.target.value)}
                         />
                         <Button onClick={handleValidate}>Validar</Button>
+                        <Button
+                            onClick={() => setShowScanner(true)}
+                            variant="outline"
+                        >
+                            <Camera className="w-4 h-4 mr-2" />
+                            Escanear
+                        </Button>
                     </div>
                     {validationResult && (
                         <div className={`p-4 rounded-xl border ${validationResult.valid ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
@@ -209,6 +218,38 @@ export function QRCodePage() {
                     )}
                 </CardContent>
             </Card>
+
+            {/* QR Scanner Modal */}
+            {showScanner && (
+                <QRCodeScanner
+                    onScan={(data) => {
+                        setValidationCode(data);
+                        setShowScanner(false);
+                        // Auto-validate after scan
+                        setTimeout(() => {
+                            try {
+                                if (data.includes('/order/')) {
+                                    const parts = data.split('/order/')[1].split('/');
+                                    const [companyId, type, number] = parts;
+                                    setValidationResult({
+                                        type: type === 'table' ? 'Mesa' : 'Quarto',
+                                        number: number,
+                                        valid: true,
+                                        message: `QR Code válido para ${type === 'table' ? 'Mesa' : 'Quarto'} ${number}`
+                                    });
+                                } else {
+                                    throw new Error('Formato inválido');
+                                }
+                            } catch (e) {
+                                setValidationResult({ valid: false, message: 'QR Code inválido ou não reconhecido.' });
+                            }
+                        }, 100);
+                    }}
+                    onClose={() => setShowScanner(false)}
+                    title="Validar QR Code"
+                    description="Aponte a câmera para o QR Code"
+                />
+            )}
         </div>
     );
 }

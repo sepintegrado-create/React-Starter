@@ -1,4 +1,4 @@
-import { UserRole } from '../types/user';
+import { UserRole, Permission } from '../types/user';
 
 export interface Route {
     path: string;
@@ -32,10 +32,13 @@ export const companyAdminRoutes: Route[] = [
     { path: '/company/pdv', name: 'PDV', icon: 'ShoppingCart', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/track-order', name: 'PEDIDOS', icon: 'ShoppingBag', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/products', name: 'PRODUTOS', icon: 'Package', roles: [UserRole.COMPANY_ADMIN] },
+    { path: '/company/categories', name: 'CATEGORIAS', icon: 'LayoutGrid', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/inventory', name: 'ESTOQUE', icon: 'Boxes', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/customers', name: 'CLIENTES', icon: 'Users', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/suppliers', name: 'FORNECEDORES', icon: 'Truck', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/employees', name: 'EQUIPE', icon: 'Users', roles: [UserRole.COMPANY_ADMIN] },
+    { path: '/company/functions', name: 'FUNÇÕES', icon: 'Briefcase', roles: [UserRole.COMPANY_ADMIN] },
+    { path: '/company/permissions', name: 'PERMISSÕES', icon: 'Shield', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/financial', name: 'FINANCEIRO', icon: 'DollarSign', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/reports', name: 'RELATÓRIOS', icon: 'BarChart', roles: [UserRole.COMPANY_ADMIN] },
     { path: '/company/fiscal', name: 'FISCAL', icon: 'FileText', roles: [UserRole.COMPANY_ADMIN] },
@@ -82,20 +85,117 @@ export const userRoutes: Route[] = [
 ];
 
 // Get routes based on role
-export function getRoutesByRole(role: UserRole): Route[] {
+export function getRoutesByRole(role: UserRole, permissions?: Permission[]): Route[] {
     switch (role) {
         case UserRole.PLATFORM_ADMIN:
             return platformAdminRoutes;
         case UserRole.COMPANY_ADMIN:
             return companyAdminRoutes;
         case UserRole.EMPLOYEE:
-            return employeeRoutes;
+            return permissions ? getEmployeeRoutesByPermissions(permissions) : employeeRoutes;
         case UserRole.SELLER:
             return sellerRoutes;
         case UserRole.USER:
         default:
             return userRoutes;
     }
+}
+
+// Get employee routes filtered by permissions
+export function getEmployeeRoutesByPermissions(permissions: Permission[], companyId?: string): Route[] {
+    // Base routes always visible
+    const baseRoutes: Route[] = [
+        { path: '/employee', name: 'INÍCIO', icon: 'Home', roles: [UserRole.EMPLOYEE] },
+        { path: '/employee/profile', name: 'MEU PERFIL', icon: 'User', roles: [UserRole.EMPLOYEE] },
+    ];
+
+    // Default permission to route mapping (fallback)
+    const defaultPermissionMap: Record<string, { name: string; icon: string; route: string }[]> = {
+        'schedule': [
+            { name: 'AGENDA', icon: 'Calendar', route: '/employee/schedule' },
+        ],
+        'pdv': [
+            { name: 'PDV', icon: 'ShoppingCart', route: '/employee/pdv' },
+        ],
+        'track-orders': [
+            { name: 'PEDIDOS', icon: 'ShoppingBag', route: '/employee/track-order' },
+        ],
+        'products': [
+            { name: 'PRODUTOS', icon: 'Package', route: '/employee/orders' },
+        ],
+        'categories': [
+            { name: 'CATEGORIAS', icon: 'LayoutGrid', route: '/employee/categories' },
+        ],
+        'inventory': [
+            { name: 'ESTOQUE', icon: 'Boxes', route: '/employee/inventory' },
+        ],
+        'customers': [
+            { name: 'CLIENTES', icon: 'Users', route: '/employee/customers' },
+        ],
+        'suppliers': [
+            { name: 'FORNECEDORES', icon: 'Truck', route: '/employee/suppliers' },
+        ],
+        'team': [
+            { name: 'EQUIPE', icon: 'Users', route: '/employee/team' },
+        ],
+        'functions': [
+            { name: 'FUNÇÕES', icon: 'Briefcase', route: '/employee/functions' },
+        ],
+        'financial': [
+            { name: 'FINANCEIRO', icon: 'DollarSign', route: '/employee/financial' },
+        ],
+        'reports': [
+            { name: 'RELATÓRIOS', icon: 'BarChart', route: '/employee/reports' },
+        ],
+        'fiscal': [
+            { name: 'FISCAL', icon: 'FileText', route: '/employee/fiscal' },
+        ],
+        'qrcode': [
+            { name: 'QR CODE', icon: 'QrCode', route: '/employee/qrcode' },
+        ],
+        'history': [
+            { name: 'HISTÓRICO', icon: 'Clock', route: '/employee/history' },
+        ],
+        'contracts': [
+            { name: 'CONTRATOS', icon: 'FileSignature', route: '/employee/contracts' },
+        ],
+        'hardware': [
+            { name: 'HARDWARE', icon: 'Cpu', route: '/employee/hardware' },
+        ],
+        'public-profile': [
+            { name: 'PERFIL PÚBLICO', icon: 'Globe', route: '/employee/public-profile' },
+        ],
+        'communication': [
+            { name: 'COMUNICAÇÃO', icon: 'MessageSquare', route: '/employee/communication' },
+        ],
+        'settings': [
+            { name: 'CONFIGURAÇÕES', icon: 'Settings', route: '/employee/settings' },
+        ],
+    };
+
+    const allowedRoutes = [...baseRoutes];
+
+    // Add routes based on permissions
+    permissions.forEach(perm => {
+        // Use default mapping
+        if (defaultPermissionMap[perm.module]) {
+            defaultPermissionMap[perm.module].forEach(routeInfo => {
+                const route: Route = {
+                    path: routeInfo.route,
+                    name: routeInfo.name,
+                    icon: routeInfo.icon,
+                    roles: [UserRole.EMPLOYEE]
+                };
+
+                // Avoid duplicates
+                if (!allowedRoutes.find(r => r.path === route.path)) {
+                    allowedRoutes.push(route);
+                }
+            });
+        }
+    });
+
+    return allowedRoutes;
 }
 
 // Check if user has access to route
